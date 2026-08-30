@@ -1,0 +1,57 @@
+<script lang="ts">
+  import { DefaultConfig } from "@/lib/configs";
+  import { Info } from "lucide-svelte";
+
+  let {
+    inpaintMethod = $bindable(DefaultConfig.inpaintMethod),
+  }: {
+    inpaintMethod: string;
+  } = $props();
+
+  const OPTIONS = [
+    {
+      id: "telea",
+      label: "Telea",
+      desc: "Quality",
+    },
+    {
+      id: "fast",
+      label: "Fast",
+      desc: "Compatible",
+    },
+  ];
+</script>
+
+<div>
+  <span class="text-sm font-bold uppercase tracking-widest text-zinc-500 ml-1">
+    Inpainting
+  </span>
+  <div
+    class="bg-zinc-50 dark:bg-zinc-900/50 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 mt-2"
+  >
+    <div class="grid grid-cols-2 gap-2">
+      {#each OPTIONS as opt}
+        <button
+          onclick={() => (inpaintMethod = opt.id)}
+          class="px-3 py-2 rounded-lg border text-sm transition-all cursor-pointer text-left shadow-sm
+          {inpaintMethod === opt.id
+            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+            : 'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-700 dark:text-zinc-300 hover:border-zinc-400'}"
+        >
+          <span class="block font-medium">{opt.label}</span>
+          <span class="block text-[10px] opacity-70">{opt.desc}</span>
+        </button>
+      {/each}
+    </div>
+    <div
+      class="flex gap-1.5 mt-3 p-2 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/30 rounded-lg text-amber-700 dark:text-amber-400"
+    >
+      <Info size={12} class="shrink-0 mt-0.5" />
+      <p class="text-[10px] leading-snug">
+        <strong>Telea</strong> uses fast-marching inpainting (better on complex
+        backgrounds, slower on large images). <strong>Fast</strong> uses the
+        legacy edge-blend (quicker, cruder).
+      </p>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: 'Bangers';
+  src: url('@/assets/fonts/Bangers-Regular.ttf') format('truetype');
+  font-display: block;
+}
+@font-face {
+  font-family: 'Comic Neue';
+  src: url('@/assets/fonts/ComicNeue-Regular.ttf') format('truetype');
+  font-display: block;
+}
+@font-face {
+  font-family: 'Noto Sans';
+  src: url('@/assets/fonts/NotoSans-Regular.ttf') format('truetype');
+  font-display: block;
+}
