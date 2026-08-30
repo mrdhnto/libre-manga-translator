@@ -1,4 +1,16 @@
-# Libre Manga Translator (LMT)
+<div align="center">
+  <img src="public/icon/128.png" width="120" alt="Libre Manga Translator">
+  <h1>Libre Manga Translator</h1>
+  <p><i>"Translate manga directly in your browser: 100% on-device (WebGPU), cloud (Gemini), or self-hosted LLM backends"</i></p>
+
+  <p>
+    <img src="https://img.shields.io/github/v/release/mrdhnto/libre-manga-translator?style=for-the-badge&logo=github&color=00ffff" alt="Version">
+    <img src="https://img.shields.io/badge/Platform-Chrome%20%7C%20Firefox-8a2be2?style=for-the-badge&logo=googlechrome" alt="Browser Support">
+    <img src="https://img.shields.io/badge/Accelerated-WebGPU-e05a2c?style=for-the-badge&logo=wgpu" alt="WebGPU">
+    <img src="https://img.shields.io/badge/Framework-Svelte%205%20%2B%20WXT-ff3e00?style=for-the-badge&logo=svelte" alt="Svelte 5">
+    <img src="https://img.shields.io/badge/License-MIT-00ff7f?style=for-the-badge" alt="License">
+  </p>
+</div>
 
 Translate manga in your browser with freedom to choose how. Run everything on your device, offload to the cloud, or point at your own self-hosted LLM backend - you decide where your data goes.
 
