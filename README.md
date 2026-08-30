@@ -14,7 +14,7 @@
 
 Translate manga in your browser with freedom to choose how. Run everything on your device, offload to the cloud, or point at your own self-hosted LLM backend - you decide where your data goes.
 
-> **Based on [ComicTL](https://github.com/kiuyha/ComicTL)** by Ketut Shridhara, with the original three-way mode concept inspired by the experimental [Local Manga Translator](https://github.com/mrdhnto/local-manga-translator) proof-of-concept. Further enhanced by the **LMT Maintainer** with API Mode, self-hosted backends, OCR surfacing, editable translations, better on-page sidebar config, better debug module and the pure-JS Telea inpainting engine.
+> **Build on [ComicTL](https://github.com/kiuyha/ComicTL)** by Ketut Shridhara, with the original three-way mode concept inspired by the experimental [Local Manga Translator](https://github.com/mrdhnto/local-manga-translator) proof-of-concept. Further enhanced by the **LMT Maintainer** with API Mode, self-hosted backends, OCR surfacing, editable translations, better on-page sidebar config, better debug module and the pure-JS Telea inpainting engine.
 
 ---
 
@@ -129,7 +129,7 @@ Detection never sends an image anywhere. The YOLO model runs in a dedicated offs
 
 **Custom fonts.** Three fonts ship with the extension (Noto Sans, Bangers, Comic Neue). Drop any TTF, OTF, or WOFF file into the Settings tab to use your own.
 
-**Opt-in improvement data.** When you correct a bounding box, LMT can send the adjusted coordinates (and the original image, per the current implementation) to help retrain the detection model. This is opt-in during onboarding and can be turned off at any time.
+**Opt-in improvement data.** When you correct a bounding box, LMT can send the adjusted coordinates and the original image url / site url to help retrain the detection model. This is opt-in during onboarding and can be turned off at any time.
 
 **API Mode for self-hosted backends.** Connect to your own LLM server running locally or on your network. Supports:
 - **OpenAI-compatible APIs** (Ollama, OpenRouter, DeepSeek, and others)
