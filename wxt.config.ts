@@ -32,6 +32,7 @@ export default defineConfig({
           "/*.wasm",
           "/*.mjs",
           "/fonts/*",
+          "/icon/*",
         ],
         matches: ["<all_urls>"],
       },

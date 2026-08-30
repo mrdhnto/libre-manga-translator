@@ -399,20 +399,19 @@ export function sendBboxDataToTelemetry(
     originalSrc.startsWith("data:") || originalSrc.startsWith("blob:");
   const imageUrl = isDataOrBlob ? window.location.href : originalSrc;
 
-  fetch(env.telemetryUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${env.telemetryPublicKey}`,
-    },
-    body: JSON.stringify({
-      seriesName,
-      chapterId,
-      pageIndex,
-      bboxes,
-      imageUrl,
-    }),
-  }).catch(() => {}); // silently ignore failures
+  // Send via background to bypass page CSP/CORS
+  browser.runtime
+    .sendMessage({
+      type: "SEND_TELEMETRY",
+      data: {
+        seriesName,
+        chapterId,
+        pageIndex,
+        bboxes,
+        imageUrl,
+      },
+    })
+    .catch(() => {});
 }
 
 export async function updateSeriesContext(

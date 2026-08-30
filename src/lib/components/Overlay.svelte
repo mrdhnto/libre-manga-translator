@@ -280,6 +280,7 @@ function applyBboxesSort() {
   function deleteActiveBox() {
     if (activeIndex !== null) {
       bboxes = bboxes.filter((_, i) => i !== activeIndex);
+      isManuallySorted = true;
       saveHistory();
       activeIndex = null;
     }
@@ -288,6 +289,7 @@ function applyBboxesSort() {
   function clearAllBoxes() {
     if (bboxes.length === 0) return;
     bboxes = [];
+    isManuallySorted = true;
     saveHistory();
     activeIndex = null;
   }
@@ -303,11 +305,8 @@ function applyBboxesSort() {
         confidence: 1,
       },
     ];
-    if (!isManuallySorted) {
-      applyBboxesSort();
-    } else {
-      saveHistory();
-    }
+    isManuallySorted = true;
+    saveHistory();
     activeIndex = bboxes.length - 1;
   }
 
@@ -773,7 +772,7 @@ function applyBboxesSort() {
 
   {#if showEditPanel}
     <div
-      class="absolute inset-0 z-80 bg-black/50 flex items-center justify-center p-4"
+      class="absolute inset-0 z-80 bg-black/50 flex items-center justify-center p-10"
       onclick={(e) => e.stopPropagation()}
       role="presentation"
     >

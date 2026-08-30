@@ -272,9 +272,11 @@
     <!-- Header -->
     <div class="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 shrink-0">
       <div class="flex items-center gap-2">
-        <div class="w-6 h-6 bg-blue-500 rounded-md flex items-center justify-center text-white font-bold text-xs shrink-0">
-          L
-        </div>
+        <img
+          src={browser.runtime.getURL("/icon/48.png")}
+          alt="LMT"
+          class="w-6 h-6 rounded-md shrink-0 object-contain"
+        />
         <span class="font-bold text-sm tracking-tight">LMT Settings</span>
       </div>
       <button

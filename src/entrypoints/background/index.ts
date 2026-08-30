@@ -1,3 +1,4 @@
+import { env } from "@/lib/env";
 import { downloadArtifactHF, arrayBufferToBase64DataUrl } from "@/lib/utils";
 import { detectHardware, ensureOffscreen } from "./utils";
 import { DefaultConfig } from "@/lib/configs";
@@ -70,6 +71,31 @@ export default defineBackground(() => {
     const respond = createAsyncResponder(sendResponse);
     const respondErr = (err: unknown) =>
       respond({ error: (err as Error).message ?? String(err) });
+
+    // Send anonymous bbox telemetry data from background context (bypasses page CSP)
+    if (msg.type === "SEND_TELEMETRY") {
+      const task = async () => {
+        if (!env.telemetryUrl || !env.telemetryPublicKey) {
+          return { skipped: true };
+        }
+        const res = await fetch(env.telemetryUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${env.telemetryPublicKey}`,
+          },
+          body: JSON.stringify(msg.data),
+        });
+        if (!res.ok) {
+          throw new Error(`Telemetry failed with status ${res.status}: ${res.statusText}`);
+        }
+        return { success: true };
+      };
+
+      keepAliveWhile(task().then(respond).catch(respondErr));
+
+      return true;
+    }
 
     // Proxy image fetch for cross-origin or hotlink-protected images (Cloudflare, Referer checks).
     // Uses declarativeNetRequest to inject the proper Referer so CDNs accept the request,

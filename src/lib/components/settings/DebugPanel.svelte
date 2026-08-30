@@ -299,7 +299,7 @@
                 <div class="text-[10px] font-bold uppercase text-zinc-400 mb-0.5">
                   OCR Source
                 </div>
-                <div class="space-y-0.5 max-h-20 overflow-y-auto">
+                <div class="space-y-0.5 max-h-20 overflow-y-auto custom-scrollbar">
                   {#each log.sourceTexts as txt, i}
                     <div class="font-mono text-[10px] text-zinc-600 dark:text-zinc-400 truncate">
                       <strong class="text-zinc-400">#{i + 1}:</strong>
@@ -315,7 +315,7 @@
                 <div class="text-[10px] font-bold uppercase text-zinc-400 mb-0.5">
                   Translations
                 </div>
-                <div class="space-y-0.5 max-h-20 overflow-y-auto">
+                <div class="space-y-0.5 max-h-20 overflow-y-auto custom-scrollbar">
                   {#each log.translations as txt, i}
                     <div class="font-mono text-[10px] text-zinc-600 dark:text-zinc-400 truncate">
                       <strong class="text-zinc-400">#{i + 1}:</strong> {txt}
