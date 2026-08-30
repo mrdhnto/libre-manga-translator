@@ -18,6 +18,41 @@ Translate manga in your browser with freedom to choose how. Run everything on yo
 
 ---
 
+## Showcase & Visual Proof
+
+<details open>
+<summary>📸 <b>Translation Proof: Raw vs Translated</b></summary>
+
+| Original Raw Manga Page | Translated Result (Inpainted + Rendered) |
+| :---: | :---: |
+| ![Original Manga](docs/images/raw-sample.jpg) | ![Translated Result](docs/images/translated-sample.jpg) |
+
+</details>
+
+<details>
+<summary>✏️ <b>Interactive Editor & OCR Surfacing</b></summary>
+
+| Bounding Box Refinement | In-Place Translation & OCR Edit Modal |
+| :---: | :---: |
+| ![Refine Boxes](docs/images/refine-editor.jpg) | ![Edit Modal](docs/images/edit-modal.jpg) |
+
+</details>
+
+<details>
+<summary>⚙️ <b>On-Page Sidebar & Settings Panel</b></summary>
+
+| Floating Sidebar (Pipeline & Backend) | Inpainting & Appearance Settings |
+| :---: | :---: |
+| ![Sidebar Pipeline](docs/images/sidebar-pipeline.jpg) | ![Sidebar Inpaint Settings](docs/images/sidebar-inpaint.jpg) |
+
+| Setup Wizard (Onboarding) | Debugging & Latency Logs |
+| :---: | :---: |
+| ![Setup Wizard](docs/images/setup-wizard.jpg) | ![Debug Panel](docs/images/debug-panel.jpg) |
+
+</details>
+
+---
+
 ## How It Works
 
 ```mermaid
@@ -91,7 +126,11 @@ Detection never sends an image anywhere. The YOLO model runs in a dedicated offs
 
 **Dual schema support.** Switch between standard OpenAI (`response_format.json_object`) and LM Studio experimental (`input` array + `system_prompt`) payload formats without changing your model.
 
-**Toggle to compare.** toggle to swap the image between original and translated result.
+**Editable translations & OCR inspection.** In the results view, open the **Edit** modal to inspect raw OCR text side-by-side with translated text per bubble. Tweak translations manually and click **Apply** to re-render directly on the canvas without re-running inpainting.
+
+**Image export.** Save and download full-resolution translated pages directly as JPEG via the results toolbar.
+
+**Toggle to compare.** Toggle to swap the image between original and translated result.
 
 **On-page sidebar panel.** A floating cog opens a sliding settings panel directly on the page (no need to open the popup). It shares the same settings components as the popup, so both stay in sync.
 
@@ -163,7 +202,11 @@ Open the extension popup and go through the onboarding flow, or go to **Settings
 3. The overlay opens and runs bubble detection automatically
 4. Adjust any boxes that were missed or drawn wrong
 5. Click **Confirm**
-6. Read
+6. Read, or use the results toolbar:
+   - **Edit:** Adjust translations or fix typos with live canvas re-render
+   - **Refine Boxes:** Go back to adjust bubble coordinates and re-translate
+   - **Save JPG:** Export full-resolution translated image
+   - **Original toggle:** Swap between raw page and translated result
 
 ---
 

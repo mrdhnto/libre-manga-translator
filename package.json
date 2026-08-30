@@ -2,7 +2,7 @@
   "name": "lmt",
   "description": "Local Manga Translator - Privacy-focused manga translation extension",
   "private": true,
-  "version": "1.0.0-beta1",
+  "version": "1.0.0-Beta2",
   "type": "module",
   "scripts": {
     "dev": "wxt",
