@@ -384,12 +384,49 @@ src/
 
 ---
 
-## Roadmap
+## Roadmap & Status
 
-### Planned / Ideas
-- Signed Firefox release (temporary add-ons don't survive a restart)
+LMT is under active development. Releases are intentionally infrequent while
+the pipeline stabilizes - this section reflects what's actually being worked
+on right now, not just a wishlist. Check the [commit history](../../commits/development)
+for day-to-day activity between releases.
+
+### ✅ Released
+
+- *Mouse event handling in the bubble editor* - drag/resize interactions
+  had [describe the bug briefly, e.g. "inconsistent hit targets on
+  overlapping boxes"].
+
+### 🔧 In Progress
+
+- *More OCR model options* - evaluate alternatives to PaddleOCR for
+  vertical text and non-Latin scripts, likely offered as a selectable
+  detection setting rather than a hard swap.
+
+### 🐛 Known Issues (actively investigating)
+
+- *Vertical text OCR* - PaddleOCR frequently misreads or drops
+  vertically-oriented text runs, common in traditional Japanese layout.
+- *OCR reliability on JP / Manhwa / Manhua text* - text extraction
+  intermittently fails to produce results across these formats; root cause
+  still being isolated (may be OCR model limitation vs. preprocessing issue).
+- *Inpainting quality* - current Telea implementation struggles on
+  [describe: e.g. "dense screentone backgrounds" / "gradient panels"]; looking
+  at improvements to the fast-marching parameters and/or a better fallback.
+
+Found a bug not listed here? Open an issue - it helps prioritize.
+
+### 🗺️ Planned
+
+- *Improved inpainting* - beyond parameter tuning, investigate
+  [e.g. "a learned inpainting model" / "hybrid Telea + Fast selection"].
+- Signed Firefox release
 - More community site adapters
-- Fix known bugs and quirks
+
+---
+
+*Status as of September 2026. This list changes as issues are found and fixed
+during dev testing - it's not a fixed commitment, just where things stand.*
 
 ---
 
