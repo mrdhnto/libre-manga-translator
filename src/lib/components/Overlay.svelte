@@ -325,6 +325,28 @@ function applyBboxesSort() {
     };
   }
 
+  // Prevent any mouse/pointer/drag interaction inside the overlay from
+  // bubbling to the host page. Manga readers bind these on the image/wrapper
+  // (click-next-page, drag-to-scroll), so without this trap every click or
+  // drag on the overlay flips the page or scrolls the reader.
+  // Only stopPropagation: preventDefault would suppress the compatibility
+  // mousedown that handleDragStart relies on, and would block focus on the
+  // edit-panel textareas.
+  function isolateHostEvents(e: Event) {
+    e.stopPropagation();
+  }
+
+  // Click needs preventDefault too: some readers (e.g. nhentai) wrap the img
+  // in a native <a href="next-page">, and our overlay mounts inside that
+  // anchor. stopPropagation alone does NOT cancel native link navigation —
+  // only preventDefault() does. Box drag, textarea focus, and our own button
+  // onclick all fire on mousedown/target phase, so preventing click's default
+  // action is safe and doesn't interfere with them.
+  function isolateHostClick(e: MouseEvent) {
+    e.stopPropagation();
+    e.preventDefault();
+  }
+
   onMount(async () => {
     const initialCache = await getTranslationCache();
 
@@ -424,6 +446,11 @@ function applyBboxesSort() {
     };
 
     const handleMouseMove = (e: MouseEvent) => {
+      // Stop these from bubbling to page-level drag listeners while a box
+      // drag/resize is in flight (reader sites track mousemove to page-flip).
+      e.stopPropagation();
+      e.preventDefault();
+
       requestAnimationFrame(() => {
         if (!dragInfo) return;
         const { index, handle, startX, startY, initialBox } = dragInfo;
@@ -450,7 +477,10 @@ function applyBboxesSort() {
       });
     };
 
-    const handleMouseUp = () => {
+    const handleMouseUp = (e: MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+
       if (dragInfo) {
         const box = bboxes[dragInfo.index];
         const initialBox = dragInfo.initialBox;
@@ -523,13 +553,21 @@ function applyBboxesSort() {
 </script>
 
 <div
-  id="lmt-overlay"
-  role="presentation"
-  class="absolute top-0 left-0 overflow-hidden pointer-events-auto group z-50 w-full h-full"
-  onclick={(e) => {
-    if (mode !== "results") e.stopPropagation();
-  }}
->
+    id="lmt-overlay"
+    role="presentation"
+    class="absolute top-0 left-0 overflow-hidden pointer-events-auto group z-50 w-full h-full"
+    onmousedown={isolateHostEvents}
+    onpointerdown={isolateHostEvents}
+    onpointerup={isolateHostEvents}
+    ontouchstart={isolateHostEvents}
+    ontouchend={isolateHostEvents}
+    ontouchmove={isolateHostEvents}
+    oncontextmenu={isolateHostEvents}
+    ondblclick={isolateHostEvents}
+    ondragstart={isolateHostEvents}
+    onclickcapture={(e) => e.preventDefault()}
+    onclick={isolateHostClick}
+  >
   {#if mode === "loading"}
     <div
       class="absolute inset-0 bg-black/60 backdrop-blur-[1px] flex items-center justify-center z-70"
