@@ -393,9 +393,7 @@ for day-to-day activity between releases.
 
 ### ✅ Released
 
-- *Mouse event handling in the bubble editor* - drag/resize interactions
-  had [describe the bug briefly, e.g. "inconsistent hit targets on
-  overlapping boxes"].
+- *Mouse event handling in the bubble editor* - drag/resize interactions had.
 
 ### 🔧 In Progress
 
@@ -406,20 +404,16 @@ for day-to-day activity between releases.
 ### 🐛 Known Issues (actively investigating)
 
 - *Vertical text OCR* - PaddleOCR frequently misreads or drops
-  vertically-oriented text runs, common in traditional Japanese layout.
+  vertically-oriented text runs, common in traditional Japanese layout / manhwa / manhua.
 - *OCR reliability on JP / Manhwa / Manhua text* - text extraction
-  intermittently fails to produce results across these formats; root cause
-  still being isolated (may be OCR model limitation vs. preprocessing issue).
-- *Inpainting quality* - current Telea implementation struggles on
-  [describe: e.g. "dense screentone backgrounds" / "gradient panels"]; looking
-  at improvements to the fast-marching parameters and/or a better fallback.
+  intermittently fails to produce results across these formats. Root cause still being isolated (may be OCR model limitation vs. preprocessing issue).
+- *Inpainting quality* - current Telea implementation struggles on. looking at improvements to the fast-marching parameters and/or a better fallback.
 
 Found a bug not listed here? Open an issue - it helps prioritize.
 
 ### 🗺️ Planned
 
-- *Improved inpainting* - beyond parameter tuning, investigate
-  [e.g. "a learned inpainting model" / "hybrid Telea + Fast selection"].
+- *Improved inpainting* - beyond parameter tuning, investigate better inpainting methods and/or pipeline.
 - Signed Firefox release
 - More community site adapters
 
