@@ -145,7 +145,7 @@ function wrapText(
       if (ctx.measureText(candidate).width <= maxW) {
         line = candidate;
       } else {
-        // Word doesn't fit — try hyphenating it
+        // Word doesn't fit - try hyphenating it
         if (ctx.measureText(word).width > maxW) {
           // Push whatever line we had first
           if (line) {
@@ -281,7 +281,7 @@ export async function inpaintImage(
     return { url, method: "fast" };
   }
 
-  // Telea path — try offscreen, but don't hang forever
+  // Telea path - try offscreen, but don't hang forever
   const timeout = (ms: number) =>
     new Promise<{ error: string }>((_, reject) =>
       setTimeout(() => reject(new Error("inpaint timeout")), ms),

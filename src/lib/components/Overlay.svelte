@@ -336,9 +336,9 @@ function applyBboxesSort() {
     e.stopPropagation();
   }
 
-  // Click needs preventDefault too: some readers (e.g. nhentai) wrap the img
+  // Click needs preventDefault too: some readers wrap the img
   // in a native <a href="next-page">, and our overlay mounts inside that
-  // anchor. stopPropagation alone does NOT cancel native link navigation —
+  // anchor. stopPropagation alone does NOT cancel native link navigation -
   // only preventDefault() does. Box drag, textarea focus, and our own button
   // onclick all fire on mousedown/target phase, so preventing click's default
   // action is safe and doesn't interfere with them.
@@ -361,7 +361,7 @@ function applyBboxesSort() {
     }
 
     if (rawBboxes.length === 0) {
-      showError("No text bubbles detected — add boxes manually");
+      showError("No text bubbles detected - add boxes manually");
     }
 
     // Pad boxes and filter out invalid/phantom boxes (NaN coords, zero or negative area)

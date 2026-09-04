@@ -88,8 +88,8 @@ export default defineContentScript({
         if (!imgElement) return;
 
         // Use base64 when offscreen fetch would fail:
-        //   • blob: URLs are page-scoped — offscreen cannot fetch them
-        //   • cross-origin images may lack CORS headers — offscreen fetch is blocked
+        //   • blob: URLs are page-scoped - offscreen cannot fetch them
+        //   • cross-origin images may lack CORS headers - offscreen fetch is blocked
         // imageToBase64 runs in the content script (page context) so both cases succeed.
         // Same-origin https images use the raw URL to avoid JPEG re-encode and the
         // MaxPool ceil() shape error it causes in PaddleOCR.

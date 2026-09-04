@@ -6,7 +6,7 @@ import { fetchAsImageBitmap } from "../utils";
  * Replaces OpenCV.js: emscripten embind builds its JS bindings via
  * `new Function(...)`, which Chrome MV3 forbids (`'unsafe-eval'` cannot appear
  * in `content_security_policy.extension_pages`). So `cv.inpaint` could never
- * run in the offscreen document — every translate fell back to the crude
+ * run in the offscreen document - every translate fell back to the crude
  * edge-sample blend. This module implements the same fast-marching method
  * (Telea) in plain typed-array math: no eval, no WASM, no deps.
  *
@@ -59,7 +59,7 @@ export function teleaInpaint(
   }
   if (masked === 0) return;
   // Degenerate safety: FMM over an almost-fully-masked image is slow and
-  // pointless — the caller falls back to the edge-blend path on error.
+  // pointless - the caller falls back to the edge-blend path on error.
   if (masked > total * MAX_PIXELS_FRACTION) {
     throw new Error("telea: mask covers too much of the image");
   }

@@ -257,21 +257,29 @@ Any service exposing `/v1/chat/completions` works:
 
 ## Adding Site Support (Pull Requests Welcome)
 
-LMT figures out the series name, chapter ID, and page index for each URL using a small array of regex rules in [`src/lib/adapters.ts`](src/lib/adapters.ts). Most manga sites are not in that list yet.
+LMT figures out the series name, chapter ID, and page index for each URL using site adapter rules. Most manga sites are not covered yet.
 
 Adding one is the shortest contribution you can make to this project, and it helps everyone who reads on that site.
 
-### What a rule looks like
+### Where rules live
+
+There are two places, with clear separation:
+
+- **`src/lib/adapters/`** - community adapters. One file per site, auto-imported at build time. This is where your PR goes. No registry edits, no build config - drop a file in and the next build bundles it.
+- **`src/lib/adapters.ts`** - trusted core, maintained by the LMT maintainers for long-trusted, stable sites. If your adapter becomes a community staple, it may graduate here.
+
+Precedence on domain conflicts: user custom rules > trusted core > community adapters.
+
+### What an adapter looks like
 
 ```typescript
-// src/lib/adapters.ts
+// src/lib/adapters/mangadex.ts
 
-// COMMUNITY RULES -- PULL REQUESTS WELCOME!
-// To add a new site, add a new object to this array.
-export const COMMUNITY_RULES: SiteRule[] = [
-  {
-    id: "mangadex",
-    domain: "mangadex.org",
+// One file per site. Auto-imported at build time.
+// See src/lib/adapters/README.md and _example.ts.
+export default {
+  id: "mangadex",
+  domain: "mangadex.org",
     seriesName: {
       regex: "^(?:.*?\\|\\s*)?(?:(?:Chapter|Vol)[^\\-]+\\-\\s*)?(.*?)\\s*\\-\\s*MangaDex",
       source: "title",     // extract from document.title
@@ -285,23 +293,24 @@ export const COMMUNITY_RULES: SiteRule[] = [
       source: "path",
     },
   },
-  // your rule goes here
-];
+} satisfies SiteRule;
 ```
 
-Each rule needs three fields: `seriesName`, `chapterId`, and `pageIndex`. Each field names a source (`"title"` or `"path"`) and a regex with one capturing group.
+Each field needs a `regex` with exactly one capturing group and a `source` (`"title"` for `document.title`, `"path"` for `window.location.pathname`).
 
 ### You do not need to write the regex by hand
 
-Open any chapter on the site you want to support, click the LMT icon, and use the **AI rule generator** in Settings. It reads the current page title and URL, sends them to whichever AI you have active (WebGPU, Gemini, or API), and returns a draft rule you can paste straight into the array.
+Open any chapter on the site you want to support, click the LMT icon, and use the **AI rule generator** in Settings. It reads the current page title and URL, sends them to whichever AI you have active (WebGPU, Gemini, or API), and returns a draft rule you can paste straight into your adapter file.
 
-The one rule: the regex has to work for any manga on that site, not just the one you tested on.
+The one rule: the regex has to work for any manga on that site, not just the one you tested on. Verify it against at least two different series before submitting.
 
 ### Submitting
 
 1. Fork the repo
-2. Add your object to `COMMUNITY_RULES` in `src/lib/adapters.ts`
+2. Copy `src/lib/adapters/_example.ts` to `src/lib/adapters/<site-domain>.ts` and fill it in
 3. Open a PR with the site name in the title
+
+That is it. The next build picks the file up automatically - no registry to edit.
 
 ---
 
@@ -364,7 +373,8 @@ src/
     setup/               # Onboarding flow shown on first install
 
   lib/
-    adapters.ts          # COMMUNITY_RULES and URL-to-metadata matching
+    adapters.ts          # Trusted core rules + URL-to-metadata matching
+    adapters/            # Community site adapters (auto-imported at build)
     components/
       Overlay.svelte     # Bubble editor and translation overlay
       Sidebar.svelte     # On-page sliding config panel (floating cog)
@@ -393,7 +403,7 @@ for day-to-day activity between releases.
 
 ### ✅ Released
 
-- *Mouse event handling in the bubble editor* - drag/resize interactions had.
+- *Mouse event handling in the bubble editor* - fix drag/resize interactions had takeover the event when LMT showed the overlay.
 
 ### 🔧 In Progress
 
@@ -406,14 +416,14 @@ for day-to-day activity between releases.
 - *Vertical text OCR* - PaddleOCR frequently misreads or drops
   vertically-oriented text runs, common in traditional Japanese layout / manhwa / manhua.
 - *OCR reliability on JP / Manhwa / Manhua text* - text extraction
-  intermittently fails to produce results across these formats. Root cause still being isolated (may be OCR model limitation vs. preprocessing issue).
+  intermittently fails to produce results across these formats. Root cause still being isolated (may be OCR model limitation or preprocessing issue).
 - *Inpainting quality* - current Telea implementation struggles on. looking at improvements to the fast-marching parameters and/or a better fallback.
 
 Found a bug not listed here? Open an issue - it helps prioritize.
 
 ### 🗺️ Planned
 
-- *Improved inpainting* - beyond parameter tuning, investigate better inpainting methods and/or pipeline.
+- Improved inpainting.
 - Signed Firefox release
 - More community site adapters
 

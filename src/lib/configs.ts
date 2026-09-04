@@ -65,7 +65,7 @@ export const DefaultConfig = {
     },
   ],
 
-  // External LLM server (API Mode) — Ollama / LM Studio / OpenAI-compatible
+  // External LLM server (API Mode) - Ollama / LM Studio / OpenAI-compatible
   serverHost: "http://127.0.0.1:11434/v1",
   serverSchema: "openai",
   serverModel: "qwen2.5:7b",

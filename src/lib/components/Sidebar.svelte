@@ -288,7 +288,7 @@
       </button>
     </div>
 
-    <!-- Tab strip — hide native scrollbar, show content via overflow -->
+    <!-- Tab strip - hide native scrollbar, show content via overflow -->
     <div class="tabs-strip flex overflow-x-auto px-2 py-1.5 bg-zinc-50 dark:bg-zinc-900/70 border-b border-zinc-200 dark:border-zinc-800 shrink-0 gap-0.5">
       {#each SECTIONS as s}
         <button
@@ -304,7 +304,7 @@
       {/each}
     </div>
 
-    <!-- Content area — overlay scrollbar -->
+    <!-- Content area - overlay scrollbar -->
     <div class="scroll-area flex-1 overflow-y-auto p-4 space-y-4">
       {#if loadingSettings}
         <div class="flex flex-col items-center justify-center py-12 gap-3">
@@ -548,7 +548,7 @@
 {/if}
 
 <style>
-  /* Overlay scrollbar — content area */
+  /* Overlay scrollbar - content area */
   .scroll-area::-webkit-scrollbar {
     width: 4px;
   }

@@ -82,7 +82,7 @@ interface DebugEntry {
   error?: string;
 }
 
-type ExtractSource = "title" | "path";
+type ExtractSource = "title" | "path" | "hash";
 
 interface SiteRule {
   id: string;

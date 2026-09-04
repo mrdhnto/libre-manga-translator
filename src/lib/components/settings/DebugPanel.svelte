@@ -86,7 +86,7 @@
       Enable Debug Logging
     </span>
     <span class="text-[10px] text-zinc-400">
-      {debugEnabled ? "Capturing translation data" : "Not recording — enable to start"}
+      {debugEnabled ? "Capturing translation data" : "Not recording - enable to start"}
     </span>
   </div>
   <button

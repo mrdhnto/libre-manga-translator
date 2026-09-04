@@ -186,7 +186,7 @@ export default defineBackground(() => {
           ensureOffscreen()
             .then(forward)
             .catch(async () => {
-              // Offscreen may be dead (e.g. CSP crash) — recreate and retry once.
+              // Offscreen may be dead (e.g. CSP crash) - recreate and retry once.
               await browser.offscreen.closeDocument().catch(() => {});
               await ensureOffscreen();
               return forward();
@@ -244,7 +244,7 @@ export default defineBackground(() => {
       const task = ensureOffscreen()
         .then(forward)
         .catch(async () => {
-          // Offscreen may be dead (e.g. CSP crash) — recreate and retry once.
+          // Offscreen may be dead (e.g. CSP crash) - recreate and retry once.
           await browser.offscreen.closeDocument().catch(() => {});
           await ensureOffscreen();
           return forward();
