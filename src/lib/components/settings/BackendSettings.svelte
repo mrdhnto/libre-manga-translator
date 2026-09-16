@@ -301,7 +301,7 @@
           : 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-800/30 text-red-600 dark:text-red-500'}"
       >
         {#if serverTestResult.success}
-          Connected — {serverTestResult.models?.length ?? 0} model(s) found.
+          Connected - {serverTestResult.models?.length ?? 0} model(s) found.
         {:else}
           {serverTestResult.error}
         {/if}

@@ -1,5 +1,6 @@
 import { defineConfig } from "wxt";
 import tailwindcss from "@tailwindcss/vite";
+import pkg from "./package.json";
 
 // See https://wxt.dev/api/config.html
 export default defineConfig({
@@ -12,6 +13,7 @@ export default defineConfig({
 
   manifest: {
     name: "Libre Manga Translator",
+    version_name: pkg.version,
     description: "Privacy-focused manga translator: local WebGPU, Gemini cloud, or self-hosted LLM",
     permissions: [
       "activeTab",

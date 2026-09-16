@@ -4,8 +4,10 @@
 
   let {
     ocrMinConfidence = $bindable(DefaultConfig.ocrMinConfidence),
+    scriptGate = $bindable(DefaultConfig.scriptGate),
   }: {
     ocrMinConfidence: number;
+    scriptGate: boolean;
   } = $props();
 </script>
 
@@ -17,6 +19,28 @@
     class="bg-zinc-50 dark:bg-zinc-900/50 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 mt-2"
   >
     <div class="flex flex-col space-y-2">
+      <div class="flex justify-between items-center gap-2">
+        <div>
+          <span class="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+            Language Gate
+          </span>
+          <p class="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5 leading-snug max-w-48">
+            Skip boxes that aren't in the source language; marked boxes can be
+            translated anyway.
+          </p>
+        </div>
+        <label class="relative inline-flex items-center cursor-pointer shrink-0">
+          <input
+            type="checkbox"
+            bind:checked={scriptGate}
+            class="sr-only peer"
+          />
+          <div
+            class="w-9 h-5 bg-zinc-200 dark:bg-zinc-700 rounded-full peer peer-checked:bg-blue-500 transition-all after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4"
+          ></div>
+        </label>
+      </div>
+
       <div class="flex justify-between items-center">
         <label
           for="ocr-min-confidence"

@@ -1,7 +1,7 @@
 # Privacy Policy
 
-**Effective Date:** August 29, 2026
-**Last Updated:** August 29, 2026
+**Effective Date:** September 16, 2026
+**Last Updated:** September 16, 2026
 
 This Privacy Policy describes how Libre Manga Translator ("LMT," "the Extension," "we," "us," or "our") handles information when you install and use the LMT browser extension. Please read it carefully before using the Extension.
 
@@ -35,14 +35,22 @@ When you use LMT in WebGPU Mode (the default), this guarantee holds:
 All of the following processing occurs exclusively within your browser's sandboxed extension environment, on your local hardware:
 
 - **Bubble detection:** A YOLO-Nano or YOLO-Small ONNX model runs inside a dedicated offscreen document via ONNX Runtime Web. No image data leaves this sandboxed context.
+- **Script verification:** A lightweight script-identification LSTM model (OSD, ~3.7 MB, Apache-2.0 licensed) runs on-device to verify detected regions contain the source language before translation. This gate model is downloaded from Hugging Face on first use and runs entirely locally.
 - **Text extraction:** PaddleOCR ONNX model processes the content of each detected bounding box on-device.
-- **Inpainting:** Pure-JS Telea fast-marching algorithm (with local fallback) removes text from speech bubbles on-device before rendering translations.
+- **Inpainting:** Pure-JS engine ladder (planar fill, bilateral denoise, Telea fast-marching) with automatic quality-gated escalation removes text from speech bubbles on-device before rendering translations. The engine selection is automatic and runs entirely locally.
 - **Translation:** WebLLM loads a local language model (Qwen3-4B or Qwen3-8B) into memory and performs inference using your device's GPU via WebGPU. No text is transmitted to any external endpoint.
 - **Result rendering:** Translated text is painted onto the inpainted page using a canvas overlay that exists only in your browser tab.
 
 ### Model weights
 
-The model weights are downloaded from [Hugging Face](https://huggingface.co) when the Extension is first installed or when a model update is available. This download involves only the model weight files and does not include any of your manga images or personal data. Hugging Face's own privacy policy governs that download request.
+The model weights are downloaded from [Hugging Face](https://huggingface.co) when the Extension is first installed or when a model update is available. This includes:
+
+- **YOLO bubble detection model** (YOLO26-Nano or YOLO26-Small)
+- **Script gate model** (OSD script-identification LSTM, ~3.7 MB, Apache-2.0)
+- **PaddleOCR text extraction model**
+- **WebLLM translation model** (Qwen3-4B or Qwen3-8B, WebGPU Mode only)
+
+These downloads involve only the model weight files and do not include any of your manga images or personal data. Hugging Face's own privacy policy governs those download requests.
 
 ---
 
@@ -136,13 +144,13 @@ Telemetry data is stored in our database backend (such as Cloudflare D1 / server
 
 The Extension stores certain data locally in your browser using the `chrome.storage` API (or its Firefox equivalent). This data never leaves your device unless you explicitly use Gemini Mode or API Mode as described in Sections 3 and 4. Locally stored data includes:
 
-- **Extension settings:** Your selected operating mode (WebGPU, Gemini, or API), model size preference, minimum confidence threshold, font selection, server configuration (API Mode), and auto-update preference.
+- **Extension settings:** Your selected operating mode (WebGPU, Gemini, or API), model size preference, minimum confidence threshold, font selection, server configuration (API Mode), auto-update preference, inpainting method preference (Auto/Telea/Fast), and script gate toggle.
 - **Your Gemini API key (Gemini Mode only):** Stored in local extension storage. Never transmitted to LMT's servers.
 - **Your LLM server API key (API Mode only):** Stored in local extension storage. Never transmitted to LMT's servers.
 - **Series context:** Any title, summary, and custom dictionary data you create in the Context tab. Stored locally and, in Gemini Mode or API Mode, transmitted to Google's Gemini API or your configured LLM server as part of the translation prompt.
 - **Translation history:** The last five translation results per series, stored locally to provide context for subsequent page translations. This data remains on your device.
 - **Translation cache:** Translated page images are cached locally per series/chapter/page to avoid re-translating the same page. This data remains on your device.
-- **Inpainted image cache:** Inpainted base images (text removed via pure-JS Telea fast-marching) are cached locally per image source during a translation session to enable fast text redrawing. This cache is cleared when you close the translation overlay.
+- **Inpainted image cache:** Inpainted base images (text removed via the auto engine ladder: planar fill, bilateral denoise, or Telea fast-marching) are cached locally per image source during a translation session to enable fast text redrawing. This cache is cleared when you close the translation overlay.
 - **Onboarding state:** A flag indicating whether you have completed the onboarding flow and your telemetry opt-in decision.
 
 You may clear all locally stored Extension data at any time by uninstalling the Extension or by clearing browser extension storage through your browser's developer tools.
@@ -155,7 +163,14 @@ LMT interacts with the following third-party services under the conditions speci
 
 ### Hugging Face (huggingface.co)
 
-Model weight files are downloaded from Hugging Face's model hosting infrastructure on first install and when model updates are available (if Auto-Update is enabled in Settings). The download request contains no user content. Hugging Face may log standard server request metadata, such as IP address, per its own privacy policy.
+Model weight files are downloaded from Hugging Face's model hosting infrastructure on first install and when model updates are available (if Auto-Update is enabled in Settings). The following models are downloaded:
+
+- **YOLO bubble detection** (Kiuyha/Manga-Bubble-YOLO)
+- **Script gate** (ogkalu/image-script-identification, Apache-2.0)
+- **PaddleOCR text extraction** (monkt/paddleocr-onnx)
+- **WebLLM translation** (Qwen3 models via WebLLM, WebGPU Mode only)
+
+The download requests contain no user content. Hugging Face may log standard server request metadata, such as IP address, per its own privacy policy.
 
 ### Google Gemini API (Gemini Mode only)
 

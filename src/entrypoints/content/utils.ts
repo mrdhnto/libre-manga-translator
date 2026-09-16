@@ -1,5 +1,6 @@
 import { env } from "@/lib/env";
 import { fetchAsImageBitmap } from "@/lib/utils";
+import type { InpaintRegionResult } from "@/lib/inpaint/ladder";
 
 // Encode an <img> element to a JPEG data URL from the PAGE context at FULL natural size.
 
@@ -145,7 +146,7 @@ function wrapText(
       if (ctx.measureText(candidate).width <= maxW) {
         line = candidate;
       } else {
-        // Word doesn't fit — try hyphenating it
+        // Word doesn't fit - try hyphenating it
         if (ctx.measureText(word).width > maxW) {
           // Push whatever line we had first
           if (line) {
@@ -256,13 +257,15 @@ async function inpaintLocal(
 }
 
 /**
- * Request inpainting from offscreen document via pure-JS Telea (fast-marching).
- * Falls back to local pixel-buffer inpainting if offscreen fails or times out.
+ * Request inpainting from the offscreen document.
  * Method selection is user-configurable via `sync:inpaint-method`:
- *   "telea" → offscreen Telea (quality), fallback edge-blend on failure
- *   "fast"  → local edge-blend directly (quick, cruder)
- * Returns the inpainted data URL plus which pipeline produced it
- * ("telea" | "fast" | "fallback") for debug tracing.
+ *   "auto"   → engine ladder: per-region fitted mask, planar fill -> denoise
+ *              -> Telea, each rung decline-gated (Beta4 default).
+ *   "telea"  → legacy full-frame Telea fast-marching (quality, slow on big pages)
+ *   "fast"   → local edge-blend directly (quick, cruder)
+ * Falls back to local pixel-buffer inpainting if offscreen fails or times out.
+ * Returns the inpainted data URL, which pipeline produced it ("auto" |
+ * "telea" | "fast" | "fallback"), and per-region provenance for "auto".
  */
 export async function inpaintImage(
   imageSrc: string,
@@ -270,18 +273,19 @@ export async function inpaintImage(
   radius = 3,
 ): Promise<{
   url: string;
-  method: "telea" | "fast" | "fallback";
+  method: "auto" | "telea" | "fast" | "fallback";
+  regions?: InpaintRegionResult[];
   error?: string;
 }> {
   const method =
-    (await storage.getItem<string>("sync:inpaint-method")) ?? "telea";
+    (await storage.getItem<string>("sync:inpaint-method")) ?? "auto";
 
   if (method === "fast") {
     const url = await inpaintLocal(imageSrc, bboxes);
     return { url, method: "fast" };
   }
 
-  // Telea path — try offscreen, but don't hang forever
+  // Offscreen paths - but don't hang forever
   const timeout = (ms: number) =>
     new Promise<{ error: string }>((_, reject) =>
       setTimeout(() => reject(new Error("inpaint timeout")), ms),
@@ -291,17 +295,27 @@ export async function inpaintImage(
     const response = await Promise.race([
       browser.runtime.sendMessage({
         type: "INPAINT_IMAGE",
-        data: { src: imageSrc, bboxes, radius },
+        data: { src: imageSrc, bboxes, radius, method },
       }),
       timeout(30_000),
     ]);
 
     if (response?.error) throw new Error(response.error);
-    return { url: response, method: "telea" };
+
+    if (method === "auto") {
+      const result = response as {
+        url?: string;
+        regions?: InpaintRegionResult[];
+      };
+      if (!result?.url) throw new Error("auto inpaint returned no image");
+      return { url: result.url, method: "auto", regions: result.regions };
+    }
+
+    return { url: response as string, method: "telea" };
   } catch (err) {
     const message = (err as Error).message;
     console.warn(
-      "LMT: Offscreen Telea inpainting failed, falling back to local pixel-buffer:",
+      "LMT: Offscreen inpainting failed, falling back to local pixel-buffer:",
       message,
     );
     const url = await inpaintLocal(imageSrc, bboxes);
@@ -362,13 +376,15 @@ export async function drawTranslations(
 /**
  * Legacy wrapper: inpaint + draw text in one call.
  * Kept for backward compatibility. New code should use inpaintImage + drawTranslations separately.
+ * Only regions with text get inpainted - empty/skipped ones keep their original pixels.
  */
 export async function repaintWithTranslations(
   imageSrc: string,
   bboxes: Bbox[],
   translations: Translations,
 ): Promise<string> {
-  const { url } = await inpaintImage(imageSrc, bboxes);
+  const paintable = bboxes.filter((_, i) => translations[i]);
+  const { url } = await inpaintImage(imageSrc, paintable);
   return drawTranslations(url, bboxes, translations);
 }
 

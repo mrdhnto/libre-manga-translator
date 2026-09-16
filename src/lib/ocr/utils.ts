@@ -6,7 +6,7 @@ function getBackgroundBrightness(
   height: number,
 ): number {
   const samples: number[] = [];
-  // Sample the four edges of the crop — that's where background lives
+  // Sample the four edges of the crop - that's where background lives
   for (let x = 0; x < width; x++) {
     samples.push(grayPixels[x]); // top row
     samples.push(grayPixels[(height - 1) * width + x]); // bottom row
@@ -15,7 +15,7 @@ function getBackgroundBrightness(
     samples.push(grayPixels[y * width]); // left col
     samples.push(grayPixels[y * width + (width - 1)]); // right col
   }
-  // Use 75th percentile — robust against corner artifacts
+  // Use 75th percentile - robust against corner artifacts
   samples.sort((a, b) => a - b);
   return samples[Math.floor(samples.length * 0.75)];
 }
@@ -209,7 +209,7 @@ export function preprocessCrop(
   if (needsUpscale) {
     const upscaled = new OffscreenCanvas(intermediateW, intermediateH);
     const upCtx = upscaled.getContext("2d")!;
-    upCtx.imageSmoothingEnabled = false; // nearest-neighbour for upscale — keeps edges sharp
+    upCtx.imageSmoothingEnabled = false; // nearest-neighbour for upscale - keeps edges sharp
     upCtx.drawImage(
       srcCanvas,
       0,

@@ -901,7 +901,7 @@
                   <h2 class="text-lg font-bold">API Mode Server</h2>
                   <p class="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
                     Connect your own LLM server (Ollama, LM Studio, or any
-                    OpenAI-compatible endpoint). OCR still runs locally — only
+                    OpenAI-compatible endpoint). OCR still runs locally - only
                     extracted text is sent.
                   </p>
                 </div>

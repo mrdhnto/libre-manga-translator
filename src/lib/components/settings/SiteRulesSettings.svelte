@@ -215,6 +215,7 @@
             >
               <option value="title">Title</option>
               <option value="path">Path</option>
+              <option value="hash">Hash</option>
             </select>
             <input
               type="text"
@@ -239,6 +240,7 @@
             >
               <option value="title">Title</option>
               <option value="path">Path</option>
+              <option value="hash">Hash</option>
             </select>
             <input
               id="chapter-id-rule"
@@ -264,6 +266,7 @@
             >
               <option value="title">Title</option>
               <option value="path">Path</option>
+              <option value="hash">Hash</option>
             </select>
             <input
               id="page-index-rule"
