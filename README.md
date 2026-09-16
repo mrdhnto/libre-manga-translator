@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="public/icon/128.png" width="120" alt="Libre Manga Translator">
+  <img src="docs/images/libre-manga-translator.png" width="120" alt="Libre Manga Translator">
   <h1>Libre Manga Translator</h1>
   <p><i>"Translate manga directly in your browser: 100% on-device (WebGPU), cloud (Gemini), or self-hosted LLM backends"</i></p>
 
@@ -74,7 +74,8 @@ graph TD
     subgraph offscreen ["Offscreen Document (isolated inference thread)"]
         Detect["YOLO Detection
 ONNX Runtime Web"]
-        Detect --> Boxes[Bounding Boxes]
+        Detect --> Boxes["Bounding Boxes
+(merged, speckle dropped)"]
     end
 
     Boxes --> Refine[Review and Adjust Boxes in Editor]
@@ -87,8 +88,8 @@ right-to-left reading order"]
 OCR + Translation in one call"]
     Gemini --> Text
 
-    Mode -->|WebGPU| OCR["PaddleOCR ONNX
-on-device text extraction (CPU/WASM)"]
+    Mode -->|WebGPU| OCR["Script gate: pixels + text, then
+PaddleOCR ONNX on-device (CPU/WASM)"]
     Mode -->|API| OCR
 
     OCR --> Raw[Raw Text per Bubble]
@@ -105,7 +106,8 @@ Ollama / LM Studio / OpenAI-compatible"]
     WebLLM --> Text[Translated Text per Bubble]
     Server --> Text
 
-    Text --> Inpaint[Inpaint Original Bubble Region]
+    Text --> Inpaint["Auto inpaint ladder: fitted mask, lightest
+engine that passes quality (skipped boxes untouched)"]
     Inpaint --> Paint["Repaint with Translated Text
 custom font + auto-fit sizing"]
     Paint --> Result[Translated Page]
@@ -146,11 +148,13 @@ Detection never sends an image anywhere. The YOLO model runs in a dedicated offs
 
 **On-page sidebar panel.** A floating cog opens a sliding settings panel directly on the page (no need to open the popup). It shares the same settings components as the popup, so both stay in sync.
 
-**Inpaint method toggle.** Choose between **Telea** (pure-JS fast-marching inpainting - better on complex backgrounds, slower on large images) and **Fast** (legacy edge-blend - quicker, cruder). Found under **Appearance** in the sidebar or popup.
+**Auto inpainting (engine ladder).** The default clean path fits a text-shaped mask per region and uses the lightest engine that does the job: a planar fill that samples the paper around the text on flat pages, a bilateral denoise fill on grainy/JPEG scans, and Telea fast-marching only where the region needs a real rebuild. Every result is scored by one quality check - if it looks worse than the paper around it, the region climbs to the next engine, and if nothing passes it is left exactly as it was and flagged for you. Untouched pixels stay identical; no ghost rectangles, no flat patches, no halos. Choose **Auto** (recommended), **Telea** (legacy full-region fast-marching), or **Fast** (edge-blend) under **Appearance › Inpainting**.
+
+**Language gate.** Before translating, LMT checks each detected region really holds the source language - a lightweight on-device script-identification model (a ~3.7 MB download) over the actual pixels, confirmed against the recognized text. Sound effects, lettering over artwork, and a localiser's Latin text on a Japanese page are held back instead of machine-translated into garbage: they keep their original text and are marked with a dashed outline and a **Translate anyway** button, so a wrong call is always one click from being undone. Strict when you pick a source language (especially Japanese/Chinese/Korean), gentle under **Auto-Detect** where it follows the page's majority script. Toggle in **Settings › OCR**.
 
 **Universal cross-origin & anti-hotlink support.** Automatic fallback using background declarativeNetRequest to bypass CDN referer checks and Cloudflare protection on third-party manga hosting domains (e.g. `i.sstatic.net`, `imgsrv5.com`, `scans.lastation.us`). Combined with magic-byte MIME sniffing for robust image decoding across all formats (JPEG, PNG, WebP, GIF, AVIF).
 
-**Advanced debugging.** Session logs with JSON export, clipboard copying, and per-request metadata: mode, OCR text, translations, timing per step, bbox count, inpainting method, errors. No base64 or image payloads - lean and readable.
+**Advanced debugging.** Session logs with JSON export, clipboard copying, and per-request metadata: mode, OCR text, translations, timing per step, bbox count, inpainting method + per-rung counts (fill · denoise · telea · declined), language-gate decisions, errors. No base64 or image payloads - lean and readable.
 
 ---
 
@@ -161,8 +165,8 @@ Detection never sends an image anywhere. The YOLO model runs in a dedicated offs
 Requires [Bun](https://bun.sh).
 
 ```bash
-git clone https://github.com/mrdhnto/local-manga-translator.git
-cd local-manga-translator/lmt-1.0.0-alpha
+git clone https://github.com/mrdhnto/libre-manga-translator.git
+cd libre-manga-translator
 bun install
 
 # Development with hot reload
@@ -346,7 +350,9 @@ Nano is fast enough for interactive use and handles most manga without issues. S
 | Language | TypeScript |
 | Styling | Tailwind CSS |
 | Bubble detection | YOLO26 ONNX via ONNX Runtime Web |
+| Script gate | OSD script-identification LSTM (3.7 MB, ONNX Runtime Web) + Unicode-block text verification |
 | On-device OCR | PaddleOCR ONNX |
+| Inpainting | Pure-JS engine ladder (planar fill / bilateral denoise / Telea fast-marching) |
 | Local translation | [WebLLM](https://webllm.mlc.ai/) (Qwen3 4B / 8B) |
 | Cloud translation | Gemini API via REST |
 | API Mode backends | Ollama, LM Studio, OpenAI-compatible |
@@ -380,10 +386,11 @@ src/
       Sidebar.svelte     # On-page sliding config panel (floating cog)
       settings/          # Shared settings components (Detection/Ocr/Backend/Typography/SiteRules/Debug/Inpaint)
     configs.ts           # Defaults: models, languages, fonts, thresholds, inpaint method
-    detections/          # YOLO ONNX inference wrapper
+    detections/          # YOLO ONNX inference wrapper + region build (merge/size/tiers)
     env.ts               # Single typed source for all WXT_* env vars
     gemini/              # Gemini API client and prompt construction
-    inpaint/             # Pure-JS Telea fast-marching inpainting (telea.ts)
+    gate/                # Script gate: charset math, CTC convention, OSD session, voting/decision
+    inpaint/             # Auto engine ladder: mask fit, ring stats, planar fill, denoise, Telea, decline metric
     ocr/                 # PaddleOCR ONNX inference wrapper
     ort.ts               # ONNX Runtime init + execution-provider resolution
     prompts.ts           # Shared prompt builders for all backends
@@ -404,12 +411,15 @@ for day-to-day activity between releases.
 ### ✅ Released
 
 - *Mouse event handling in the bubble editor* - fix drag/resize interactions had takeover the event when LMT showed the overlay.
+- *Auto inpainting engine ladder* - fitted text-shaped masks and the lightest engine that passes a quality check; removes the ghost-rectangle, flat-patch, and halo artifacts of the old single-mask Telea path.
+- *Language gate* - on-device script verification that stops sound effects, artwork lettering, and wrong-language text from being machine-translated into garbage; every hold-back is one-click overridable.
+- *Deterministic region build* - merged fragments, dropped speckle, reading-order stability after detection.
 
 ### 🔧 In Progress
 
-- *More OCR model options* - evaluate alternatives to PaddleOCR for
-  vertical text and non-Latin scripts, likely offered as a selectable
-  detection setting rather than a hard swap.
+- *Model-backed inpaint rung* - an optional LaMa-class ONNX engine for screentone/art behind text, plus true per-pixel segmentation to seed the mask.
+- *Inpainting hardening* - Combine LaMa with golden-image verification of each inpaint rung and gate edge cases; screentone fixtures for the escalation path.
+- *More OCR model options* - evaluate alternatives to PaddleOCR for vertical text and non-Latin scripts, likely offered as a selectable detection setting rather than a hard swap.
 
 ### 🐛 Known Issues (actively investigating)
 
@@ -417,13 +427,14 @@ for day-to-day activity between releases.
   vertically-oriented text runs, common in traditional Japanese layout / manhwa / manhua.
 - *OCR reliability on JP / Manhwa / Manhua text* - text extraction
   intermittently fails to produce results across these formats. Root cause still being isolated (may be OCR model limitation or preprocessing issue).
-- *Inpainting quality* - current Telea implementation struggles on. looking at improvements to the fast-marching parameters and/or a better fallback.
+- *Gate false negatives* - heavily stylized or mixed-script lettering can still be read
+  as the wrong script; the language gate marks every hold-back and offers **Translate
+  anyway**, so it never silently drops a bubble.
 
 Found a bug not listed here? Open an issue - it helps prioritize.
 
 ### 🗺️ Planned
 
-- Improved inpainting.
 - Signed Firefox release
 - More community site adapters
 
@@ -463,9 +474,23 @@ Enhanced with **API Mode** and additional features inspired by the experimental 
 - `testServerConnection()` model probe and retry logic
 - Advanced debugging concept and session logging
 
+The **auto inpaint engine ladder** and **language gate** techniques were inspired by
+architectural concepts studied in **[Manga Cleaner](https://github.com/k-omiq/manga-cleaner)**
+(GPL-3.0) by KoMiQ. LMT's implementation is an independent TypeScript rewrite designed
+for browser constraints (MV3 CSP, offscreen document, limited memory); no source code
+was copied. Algorithm thresholds and parameters were re-derived through testing against
+LMT's environment.
+
+**Techniques adapted:**
+- Fitted text-shaped masks vs. full-region inpainting
+- Multi-stage engine ladder with quality-gated escalation
+- Script verification gate to prevent mistranslation of non-target text
+- Bilateral denoise for grainy scans
+
 ### Key Components
 - **Bubble Detection Model:** Custom YOLO26 trained on Manga109-s and MangaDex datasets by Ketut Shridhara - [Hugging Face](https://huggingface.co/Kiuyha/Manga-Bubble-YOLO)
-- **OCR:** PaddleOCR ONNX models
+- **Script gate model:** `image-script-identification` OSD LSTM by ogkalu (Apache-2.0) - [Hugging Face](https://huggingface.co/ogkalu/image-script-identification)
+- **OCR:** PaddleOCR ONNX models - [Hugging Face](https://huggingface.co/monkt/paddleocr-onnx)
 - **Local Translation:** WebLLM (MLC-AI) with Qwen3 4B / 8B
 - **Framework:** WXT + Svelte 5 + TypeScript + Tailwind CSS
 

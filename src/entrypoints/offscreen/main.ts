@@ -9,6 +9,7 @@ import {
 import { deleteModelAllInfoInCache } from "@mlc-ai/web-llm";
 import { makeSiteRuleLocal, translateLocal } from "@/lib/webllm";
 import { inpaintImageTelea } from "@/lib/inpaint/telea";
+import { inpaintImageAuto } from "@/lib/inpaint/ladder";
 
 async function detectBackend(): Promise<"webgpu" | "wasm"> {
   try {
@@ -65,13 +66,20 @@ browser.runtime.onMessage.addListener((msg, _, sendResponse) => {
       serverModel,
       useServerApiKey,
       serverApiKey,
+      scriptGate,
+      gateForce,
     } = msg.config;
     const { src, bboxes, seriesContext } = msg.data;
+    const gateOptions = {
+      enabled: scriptGate ?? true,
+      force: gateForce ?? false,
+    };
 
     if (currentMode === "webgpu") {
       const tOcr = performance.now();
-      textRecognise(src, bboxes, sourceLang, ocrMinConfidence)
-        .then(async (ocrResults) => {
+      textRecognise(src, bboxes, sourceLang, ocrMinConfidence, undefined, undefined, undefined, gateOptions)
+        .then(async (ocrOut) => {
+          const ocrResults = ocrOut.results;
           const ocr = performance.now() - tOcr;
           const tTrans = performance.now();
           const backend = await detectBackend();
@@ -87,6 +95,8 @@ browser.runtime.onMessage.addListener((msg, _, sendResponse) => {
             sendResponse({
               ...res,
               sourceTexts: ocrResults.map((r) => r.text),
+              gateSkip: ocrResults.map((r) => r.gateSkip ?? null),
+              gate: ocrOut.gate,
               timing: { ocr, translate: performance.now() - tTrans },
               backend,
             });
@@ -96,8 +106,9 @@ browser.runtime.onMessage.addListener((msg, _, sendResponse) => {
         })
         .catch((err) => sendResponse({ error: err.message }));
     } else if (currentMode === "api") {
-      textRecognise(src, bboxes, sourceLang, ocrMinConfidence)
-        .then((ocrResults) => {
+      textRecognise(src, bboxes, sourceLang, ocrMinConfidence, undefined, undefined, undefined, gateOptions)
+        .then((ocrOut) => {
+          const ocrResults = ocrOut.results;
           translateWithServer(
             ocrResults.map((r) => r.text),
             targetLang,
@@ -109,6 +120,8 @@ browser.runtime.onMessage.addListener((msg, _, sendResponse) => {
               sendResponse({
                 ...res,
                 sourceTexts: ocrResults.map((r) => r.text),
+                gateSkip: ocrResults.map((r) => r.gateSkip ?? null),
+                gate: ocrOut.gate,
               }),
             )
             .catch((err) => sendResponse({ error: err.message }));
@@ -165,11 +178,16 @@ browser.runtime.onMessage.addListener((msg, _, sendResponse) => {
   }
 
   if (msg.type === "OFFSCREEN_INPAINT_IMAGE") {
-    const { src, bboxes, radius } = msg.data;
+    const { src, bboxes, radius, method } = msg.data;
 
-    inpaintImageTelea(src, bboxes, radius ?? 3)
-      .then(sendResponse)
-      .catch((err) => sendResponse({ error: err.message }));
+    // "auto": per-region engine ladder (fill -> denoise -> Telea, decline-gated).
+    // Legacy methods keep the full-frame Telea response shape (a plain data URL).
+    const work: Promise<unknown> =
+      method === "auto"
+        ? inpaintImageAuto(src, bboxes)
+        : inpaintImageTelea(src, bboxes, radius ?? 3);
+
+    work.then(sendResponse).catch((err) => sendResponse({ error: err.message }));
 
     return true;
   }

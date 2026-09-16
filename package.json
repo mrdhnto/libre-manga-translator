@@ -12,6 +12,8 @@
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
     "check": "svelte-check --tsconfig ./tsconfig.json",
+    "check:inpaint": "bun scripts/inpaint-selfcheck.ts",
+    "check:gate": "bun scripts/gate-selfcheck.ts",
     "postinstall": "wxt prepare"
   },
   "devDependencies": {

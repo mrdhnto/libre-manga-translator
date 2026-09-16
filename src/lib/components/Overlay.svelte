@@ -36,11 +36,14 @@
     requestTextTranslation: (
       bboxes: Bbox[],
       isManuallySorted: boolean,
+      opts?: { gateForce?: boolean },
     ) => Promise<
       | {
           translations: Translations;
           sourceTexts?: string[];
           context?: { summary: string; dictionary: string };
+          gateSkip?: (GateReason | null)[];
+          gate?: DebugEntry["gate"];
         }
       | { error: string }
     >;
@@ -211,6 +214,12 @@ function applyBboxesSort() {
     translations = result.translations ?? [];
     sourceTexts = result.sourceTexts ?? [];
 
+    // The script gate records which regions it held back; those boxes get a
+    // dashed mark and a per-box override, their originals stay untouched.
+    bboxes.forEach((b, i) => {
+      b.gateSkip = result.gateSkip?.[i] ?? undefined;
+    });
+
     mode = "loading";
     loadingMsg = "Rendering...";
     try {
@@ -249,6 +258,40 @@ function applyBboxesSort() {
       mode = "results";
     } catch (err) {
       mode = "results";
+      showError((err as Error).message);
+    }
+  }
+
+  // Gate override escape hatch: the gate is only allowed to be strict because
+  // every false positive can be undone with one click (leaving text is
+  // recoverable, painting over it is not, so the override runs the same region
+  // with the gate bypassed).
+  let forcingIndex = $state<number | null>(null);
+  async function forceTranslateBox(i: number) {
+    if (mode !== "results" || forcingIndex !== null) return;
+    forcingIndex = i;
+    const box = $state.snapshot(bboxes[i]);
+    const result = await requestTextTranslation([box], true, {
+      gateForce: true,
+    });
+    forcingIndex = null;
+    if (typeof result === "object" && "error" in result) {
+      showError(result.error);
+      return;
+    }
+    const text = result.translations?.[0];
+    if (!text) {
+      showError("Nothing readable in that box");
+      return;
+    }
+    bboxes[i].gateSkip = undefined;
+    translations = translations.map((t, k) => (k === i ? text : t));
+    try {
+      translatedUrl = await renderTranslations(
+        $state.snapshot(translations),
+        $state.snapshot(bboxes),
+      );
+    } catch (err) {
       showError((err as Error).message);
     }
   }
@@ -703,7 +746,9 @@ function applyBboxesSort() {
         role="presentation"
         class="lmt-box absolute border-2 p-0 m-0 bg-transparent {isActive
           ? 'border-blue-500 z-50 ring-2 ring-blue-300'
-          : 'border-red-500 z-40'}"
+          : box.gateSkip
+            ? 'border-amber-500 border-dashed z-40'
+            : 'border-red-500 z-40'}"
         style:left="{box.x1 * scaleX}px"
         style:top="{box.y1 * scaleY}px"
         style:width="{(box.x2 - box.x1) * scaleX}px"
@@ -713,10 +758,14 @@ function applyBboxesSort() {
           activeIndex = i;
           handleDragStart(i, "move")(e);
         }}
-        title={`Confidence: ${(box.confidence * 100).toPrecision(2)}%`}
+        title={box.gateSkip
+          ? `${box.gateSkip === "not-japanese" ? "Language gate: text is not in the selected language" : "Language gate: unclear language"} - original left untouched, use "Translate anyway" to override`
+          : `Confidence: ${(box.confidence * 100).toPrecision(2)}%`}
       >
         <div
-          class="absolute -top-5.5 -left-0.5 bg-red-500 text-white font-bold text-sm px-1.5 py-0.5 min-w-6 text-center rounded-t-sm pointer-events-none"
+          class="absolute -top-5.5 -left-0.5 {box.gateSkip
+            ? 'bg-amber-500'
+            : 'bg-red-500'} text-white font-bold text-sm px-1.5 py-0.5 min-w-6 text-center rounded-t-sm pointer-events-none"
         >
           {i + 1}
         </div>
@@ -757,6 +806,33 @@ function applyBboxesSort() {
       alt={showOriginal ? "Original Img" : "Translated Img"}
       class="w-full h-full object-contain"
     />
+    <!-- Language-gate holds: the original text is still there, so mark the
+         box and offer the one-click override right on the page. -->
+    {#if !showOriginal}
+      {#each bboxes as box, i}
+        {#if box.gateSkip}
+          <div
+            class="absolute border-2 border-dashed border-amber-500/90 rounded-sm pointer-events-none z-30"
+            style:left="{box.x1 * scaleX}px"
+            style:top="{box.y1 * scaleY}px"
+            style:width="{(box.x2 - box.x1) * scaleX}px"
+            style:height="{(box.y2 - box.y1) * scaleY}px"
+          >
+            <button
+              type="button"
+              onclick={() => forceTranslateBox(i)}
+              disabled={forcingIndex !== null}
+              title={box.gateSkip === "not-japanese"
+                ? "The language gate read this as a different script"
+                : "The language gate could not read this confidently"}
+              class="pointer-events-auto absolute bottom-1 left-1/2 -translate-x-1/2 bg-amber-500/95 hover:bg-amber-400 disabled:opacity-60 text-white text-xs font-semibold px-2 py-0.5 rounded shadow whitespace-nowrap cursor-pointer transition-colors"
+            >
+              {forcingIndex === i ? "Translating..." : "Translate anyway"}
+            </button>
+          </div>
+        {/if}
+      {/each}
+    {/if}
     <!-- Floating action cluster beside the image -->
     <div
       class="absolute right-1 top-1/2 -translate-y-1/2 flex flex-col gap-1.5 z-50"

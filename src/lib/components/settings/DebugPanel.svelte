@@ -267,9 +267,41 @@
                   <span>{log.inpaintMethod}</span>
                 </div>
               {/if}
+              {#if log.inpaintStats}
+                <div
+                  class="col-span-2 text-[10px] font-mono text-zinc-500"
+                  title="fill · denoise · telea · rect-telea · declined · skipped"
+                >
+                  {log.inpaintStats.fill} fill ·
+                  {log.inpaintStats.denoise} denoise ·
+                  {log.inpaintStats.telea} telea ·
+                  {log.inpaintStats.rectTelea} rect
+                  {#if log.inpaintStats.declined}
+                    · <span class="text-red-400">{log.inpaintStats.declined} declined</span>
+                  {/if}
+                  {#if log.inpaintStats.skipped}
+                    · {log.inpaintStats.skipped} skipped
+                  {/if}
+                </div>
+              {/if}
               {#if log.inpaintError}
                 <div class="col-span-2 text-[10px] font-mono text-red-400 truncate" title="{log.inpaintError}">
                   Inpaint err: {log.inpaintError}
+                </div>
+              {/if}
+              {#if log.gate}
+                <div
+                  class="col-span-2 text-[10px] font-mono text-zinc-500"
+                  title="mode · regions checked · regions held back · language group"
+                >
+                  Gate: {log.gate.mode} · {log.gate.checked} checked ·
+                  <span class:text-amber-500={log.gate.skipped > 0}>
+                    {log.gate.skipped} skipped
+                  </span>
+                  {#if log.gate.group}· {log.gate.group}{/if}
+                  {#if log.gate.unavailable}
+                    · <span class="text-red-400">model unavailable - text-only</span>
+                  {/if}
                 </div>
               {/if}
               {#if log.langGroup}

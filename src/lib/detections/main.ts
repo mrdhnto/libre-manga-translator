@@ -1,6 +1,7 @@
 import * as ort from "onnxruntime-web/all";
 import { downloadArtifactHF } from "../utils";
 import { scalingImage, restoreBoundingBox, containmentNMS } from "./utils";
+import { refineDetections } from "./boxes";
 import { DefaultConfig } from "../configs";
 
 ort.env.wasm.wasmPaths = browser.runtime.getURL("/");
@@ -111,5 +112,9 @@ async function runDetection(
     );
   }
 
-  return containmentNMS(formattedDetections);
+  const nms = containmentNMS(formattedDetections);
+  // Region build: deterministic
+  // merges, speckle drop, and the growth tiers - the box the crop/inpaint
+  // works on. Flagged-large boxes stay (they are real text, just big).
+  return refineDetections(nms, origWidth, origHeight).boxes;
 }

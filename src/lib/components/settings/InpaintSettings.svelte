@@ -10,9 +10,14 @@
 
   const OPTIONS = [
     {
+      id: "auto",
+      label: "Auto",
+      desc: "Recommended",
+    },
+    {
       id: "telea",
       label: "Telea",
-      desc: "Quality",
+      desc: "Legacy quality",
     },
     {
       id: "fast",
@@ -48,9 +53,12 @@
     >
       <Info size={12} class="shrink-0 mt-0.5" />
       <p class="text-[10px] leading-snug">
-        <strong>Telea</strong> uses fast-marching inpainting (better on complex
-        backgrounds, slower on large images). <strong>Fast</strong> uses the
-        legacy edge-blend (quicker, cruder).
+        <strong>Auto</strong> fits a text-shaped mask per region and uses the
+        lightest inpainting engine that passes quality (samples the paper,
+        escalates only when needed). <strong>Telea</strong> uses fast-marching
+        inpainting on the whole box (better on complex backgrounds, slower on
+        large images). <strong>Fast</strong> uses the legacy edge-blend
+        (quicker, cruder).
       </p>
     </div>
   </div>

@@ -83,8 +83,10 @@ export const DefaultConfig = {
   detectionModelRepo: env.detectionModelRepo,
   detectionModelPath: (model: string): `${string}.onnx` => `onnx/${model}.onnx`,
 
-  // Inpainting method: "telea" (quality, offscreen fast-marching) | "fast" (edge-blend)
-  inpaintMethod: "telea",
+  // Inpainting method: "auto" (engine ladder: fitted mask -> planar fill ->
+  // denoise -> Telea, each rung decline-gated) | "telea" (legacy full-frame
+  // fast-marching) | "fast" (edge-blend)
+  inpaintMethod: "auto",
 
   ocrAutoUpdate: true,
   ocrMinConfidence: 0.75,
@@ -95,6 +97,14 @@ export const DefaultConfig = {
   ocrModelPath: (langGroup: string): `${string}.onnx` =>
     `languages/${langGroup}/rec.onnx`,
   ocrDictPath: (langGroup: string) => `languages/${langGroup}/dict.txt`,
+
+  // Script-ID gate: verifies detected regions really hold the selected
+  // source script before translating (strict when a CJK source is explicit,
+  // additive page-majority under Auto-Detect).
+  scriptGate: true,
+  gateRepo: env.gateModelRepo,
+  gateModelPath: "osd_lstm.onnx" as `${string}.onnx`,
+  gateLabelsPath: "osd_labels.json",
 
   llmTemperature: 0.3,
   minTranslations: 5, // number of translations per series before resetting context

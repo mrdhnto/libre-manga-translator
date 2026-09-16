@@ -35,6 +35,7 @@
   let detectionMinConfidence = $state(0.5);
   let detectionAutoUpdate = $state(true);
   let ocrMinConfidence = $state(DefaultConfig.ocrMinConfidence);
+  let scriptGate = $state(DefaultConfig.scriptGate);
   let llmModel = $state(DefaultConfig.llmModels[0].id);
   let llmTemperature = $state(DefaultConfig.llmTemperature);
   let serverHost = $state(DefaultConfig.serverHost);
@@ -103,6 +104,35 @@
       return matchesSearch && !isTargetAuto;
     }),
   );
+  
+  type StorageKey = `local:${string}` | `sync:${string}`;
+
+  // Keys migrated from sync→local to prevent BYOK from leaking across browser accounts.
+  const MIGRATE_SYNC_TO_LOCAL = [
+    ["sync:gemini-key",         "local:gemini-key"],
+    ["sync:server-api-key",     "local:server-api-key"],
+    ["sync:server-host",        "local:server-host"],
+    ["sync:server-schema",      "local:server-schema"],
+    ["sync:server-model",       "local:server-model"],
+    ["sync:use-server-api-key", "local:use-server-api-key"],
+  ] as const;
+
+  async function migrateLocalKeys() {
+    const oldItems = await storage.getItems(MIGRATE_SYNC_TO_LOCAL.map(([s]) => s));
+    const toWrite: { key: StorageKey; value: any }[] = [];
+    const toRemove: StorageKey[] = [];
+    for (const [syncKey, localKey] of MIGRATE_SYNC_TO_LOCAL) {
+      const val = oldItems.find((i) => i.key === syncKey)?.value;
+      if (val !== null && val !== undefined) {
+        toWrite.push({ key: localKey, value: val });
+        toRemove.push(syncKey);
+      }
+    }
+    if (toWrite.length) {
+      await storage.setItems(toWrite);
+      await storage.removeItems(toRemove);
+    }
+  }
 
   async function loadSettings() {
     try {
@@ -110,12 +140,14 @@
       seriesName = rule.seriesName;
       seriesContext.seriesName = seriesName;
 
+      await migrateLocalKeys();
+
       const items = await storage.getItems([
         "sync:share-data",
         "sync:detection-auto-update",
         "sync:detection-min-confidence",
         "sync:ocr-min-confidence",
-        "sync:gemini-key",
+        "local:gemini-key",
         "sync:gemini-model",
         "sync:detection-model",
         "sync:current-mode",
@@ -126,13 +158,14 @@
         "local:custom-fonts",
         "sync:llm-model",
         "sync:llm-temperature",
-        "sync:server-host",
-        "sync:server-schema",
-        "sync:server-model",
-        "sync:use-server-api-key",
-        "sync:server-api-key",
+        "local:server-host",
+        "local:server-schema",
+        "local:server-model",
+        "local:use-server-api-key",
+        "local:server-api-key",
         "sync:custom-site-rules",
         "sync:inpaint-method",
+        "sync:script-gate",
         "local:cached-llms",
       ]);
 
@@ -141,7 +174,7 @@
       shareData = saved["sync:share-data"] ?? shareData;
       detectionAutoUpdate = saved["sync:detection-auto-update"] ?? detectionAutoUpdate;
       detectionMinConfidence = saved["sync:detection-min-confidence"] ?? detectionMinConfidence;
-      geminiKey = saved["sync:gemini-key"] ?? geminiKey;
+      geminiKey = saved["local:gemini-key"] ?? geminiKey;
       geminiModel = saved["sync:gemini-model"] ?? geminiModel;
       detectionModel = saved["sync:detection-model"] ?? detectionModel;
       ocrMinConfidence = saved["sync:ocr-min-confidence"] ?? ocrMinConfidence;
@@ -152,13 +185,14 @@
       customFonts = Array.isArray(saved["local:custom-fonts"]) ? saved["local:custom-fonts"] : [];
       llmModel = saved["sync:llm-model"] ?? llmModel;
       llmTemperature = saved["sync:llm-temperature"] ?? llmTemperature;
-      serverHost = saved["sync:server-host"] ?? serverHost;
-      serverSchema = saved["sync:server-schema"] ?? serverSchema;
-      serverModel = saved["sync:server-model"] ?? serverModel;
-      useServerApiKey = saved["sync:use-server-api-key"] ?? useServerApiKey;
-      serverApiKey = saved["sync:server-api-key"] ?? serverApiKey;
+      serverHost = saved["local:server-host"] ?? serverHost;
+      serverSchema = saved["local:server-schema"] ?? serverSchema;
+      serverModel = saved["local:server-model"] ?? serverModel;
+      useServerApiKey = saved["local:use-server-api-key"] ?? useServerApiKey;
+      serverApiKey = saved["local:server-api-key"] ?? serverApiKey;
       customRules = saved["sync:custom-site-rules"] ?? customRules;
       inpaintMethod = saved["sync:inpaint-method"] ?? inpaintMethod;
+      scriptGate = saved["sync:script-gate"] ?? scriptGate;
       cachedLlms = Array.isArray(saved["local:cached-llms"]) ? saved["local:cached-llms"] : [];
 
       const storedCtx = saved[`sync:context-${seriesName}`];
@@ -176,7 +210,7 @@
         { key: "sync:detection-auto-update", value: detectionAutoUpdate },
         { key: "sync:detection-min-confidence", value: detectionMinConfidence },
         { key: "sync:ocr-min-confidence", value: ocrMinConfidence },
-        { key: "sync:gemini-key", value: geminiKey },
+        { key: "local:gemini-key", value: geminiKey },
         { key: "sync:gemini-model", value: geminiModel },
         { key: "sync:source-lang", value: sourceLang },
         { key: "sync:target-lang", value: targetLang },
@@ -187,13 +221,14 @@
         { key: "local:custom-fonts", value: $state.snapshot(customFonts) },
         { key: "sync:llm-model", value: llmModel },
         { key: "sync:llm-temperature", value: llmTemperature },
-        { key: "sync:server-host", value: serverHost },
-        { key: "sync:server-schema", value: serverSchema },
-        { key: "sync:server-model", value: serverModel },
-        { key: "sync:use-server-api-key", value: useServerApiKey },
-        { key: "sync:server-api-key", value: serverApiKey },
+        { key: "local:server-host", value: serverHost },
+        { key: "local:server-schema", value: serverSchema },
+        { key: "local:server-model", value: serverModel },
+        { key: "local:use-server-api-key", value: useServerApiKey },
+        { key: "local:server-api-key", value: serverApiKey },
         { key: "sync:custom-site-rules", value: $state.snapshot(customRules) },
         { key: "sync:inpaint-method", value: inpaintMethod },
+        { key: "sync:script-gate", value: scriptGate },
       ]);
     }, 150);
   }
@@ -201,7 +236,7 @@
   $effect(() => {
     if (loadingSettings) return;
     [
-      shareData, detectionAutoUpdate, detectionMinConfidence, ocrMinConfidence,
+      shareData, detectionAutoUpdate, detectionMinConfidence, ocrMinConfidence, scriptGate,
       geminiKey, geminiModel, sourceLang, targetLang, detectionModel, currentMode,
       seriesContext.seriesName, seriesContext.summary, seriesContext.dictionary,
       textFont, customFonts.length, inpaintMethod, llmModel, llmTemperature,
@@ -427,7 +462,7 @@
               <p class="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">
                 OCR Threshold
               </p>
-              <OcrSettings bind:ocrMinConfidence />
+              <OcrSettings bind:ocrMinConfidence bind:scriptGate />
             </div>
           </div>
         {/if}
@@ -542,7 +577,7 @@
         <input type="checkbox" bind:checked={shareData} class="rounded accent-blue-500" />
         <span>Anonymous data sharing</span>
       </label>
-      <span class="text-[10px] font-bold text-zinc-400">v{browser.runtime.getManifest().version}</span>
+      <span class="text-[10px] font-bold text-zinc-400">v{(browser.runtime.getManifest() as any).version_name || browser.runtime.getManifest().version}</span>
     </div>
   </div>
 {/if}

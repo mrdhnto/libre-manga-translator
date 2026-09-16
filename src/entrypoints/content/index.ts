@@ -25,7 +25,10 @@ export default defineContentScript({
 
   async main(ctx) {
     const translatedSrcMap = new Map<string, string>();
-    const inpaintedSrcCache = new Map<string, string>(); // Cache inpainted base images
+    const inpaintedSrcCache = new Map<
+      string,
+      { url: string; boxesKey: string }
+    >(); // inpainted base images, keyed to the exact set of painted boxes
     const debugEntryIdBySrc = new Map<string, string>(); // src → last debug entry id
     const overlays = new Map<
       string,
@@ -191,6 +194,7 @@ export default defineContentScript({
                 requestTextTranslation: async (
                   bboxes: Bbox[],
                   isManuallySorted: boolean,
+                  opts?: { gateForce?: boolean },
                 ) => {
                   const t0 = performance.now();
                   const { seriesName, chapterId, pageIndex } =
@@ -203,7 +207,14 @@ export default defineContentScript({
                       seriesName,
                       chapterId,
                       pageIndex,
-                      bboxes,
+                      // strip local-only fields (gateSkip) from the payload
+                      bboxes.map((b) => ({
+                        x1: b.x1,
+                        y1: b.y1,
+                        x2: b.x2,
+                        y2: b.y2,
+                        confidence: b.confidence,
+                      })),
                       src,
                     );
 
@@ -228,20 +239,20 @@ export default defineContentScript({
                   const srcLang = (await storage.getItem<string>("sync:source-lang")) ?? DefaultConfig.sourceLang;
                   const tgtLang = (await storage.getItem<string>("sync:target-lang")) ?? DefaultConfig.targetLang;
                   const debugCtx = {
-                    version: browser.runtime.getManifest().version,
+                    version: (browser.runtime.getManifest() as any).version_name || browser.runtime.getManifest().version,
                     device: (await storage.getItem<string>("local:active-device")) ?? undefined,
                     langGroup: DefaultConfig.ocrLangGroupMap[srcLang] ?? "latin",
                     ocrMinConfidence: (await storage.getItem<number>("sync:ocr-min-confidence")) ?? DefaultConfig.ocrMinConfidence,
                     detectionMinConfidence: (await storage.getItem<number>("sync:detection-min-confidence")) ?? DefaultConfig.detectionMinConfidence,
                     temperature: (await storage.getItem<number>("sync:llm-temperature")) ?? DefaultConfig.llmTemperature,
-                    serverSchema: (await storage.getItem<string>("sync:server-schema")) ?? DefaultConfig.serverSchema,
+                    serverSchema: (await storage.getItem<string>("local:server-schema")) ?? DefaultConfig.serverSchema,
                     geminiModel: (await storage.getItem<string>("sync:gemini-model")) ?? DefaultConfig.geminiModels[0].id,
                     ocrModel: DefaultConfig.ocrModelPath(
                       DefaultConfig.ocrLangGroupMap[srcLang] ?? "latin",
                     ),
                     detectionModel: (await storage.getItem<string>("sync:detection-model")) ?? DefaultConfig.detectionModels[0].id,
                     llmModel: (await storage.getItem<string>("sync:llm-model")) ?? undefined,
-                    serverModel: (await storage.getItem<string>("sync:server-model")) ?? undefined,
+                    serverModel: (await storage.getItem<string>("local:server-model")) ?? undefined,
                   };
 
                   const resp = await browser.runtime.sendMessage({
@@ -256,7 +267,7 @@ export default defineContentScript({
                       targetLang: tgtLang,
                       sourceLang: srcLang,
                       geminiKey:
-                        await storage.getItem<string>("sync:gemini-key"),
+                        await storage.getItem<string>("local:gemini-key"),
                       geminiModel:
                         await storage.getItem<string>("sync:gemini-model"),
                       ocrMinConfidence: await storage.getItem<number>(
@@ -267,16 +278,20 @@ export default defineContentScript({
                         "sync:llm-temperature",
                       ),
                       serverHost:
-                        await storage.getItem<string>("sync:server-host"),
+                        await storage.getItem<string>("local:server-host"),
                       serverSchema:
-                        await storage.getItem<string>("sync:server-schema"),
+                        await storage.getItem<string>("local:server-schema"),
                       serverModel:
-                        await storage.getItem<string>("sync:server-model"),
+                        await storage.getItem<string>("local:server-model"),
                       useServerApiKey: await storage.getItem<boolean>(
-                        "sync:use-server-api-key",
+                        "local:use-server-api-key",
                       ),
                       serverApiKey:
-                        await storage.getItem<string>("sync:server-api-key"),
+                        await storage.getItem<string>("local:server-api-key"),
+                      scriptGate:
+                        (await storage.getItem<boolean>("sync:script-gate")) ??
+                        DefaultConfig.scriptGate,
+                      gateForce: opts?.gateForce ?? false,
                     },
                   });
 
@@ -313,7 +328,8 @@ export default defineContentScript({
                     return resp;
                   }
 
-                  const { translations, context, sourceTexts } = resp;
+                  const { translations, context, sourceTexts, gateSkip, gate } =
+                    resp;
                   const timing = {
                     total: duration,
                     detect: lastDetectMs,
@@ -330,6 +346,15 @@ export default defineContentScript({
                     version: debugCtx.version,
                     device: debugCtx.device,
                     backend: curMode === "webgpu" ? backend : undefined,
+                    gate: gate
+                      ? {
+                          mode: gate.mode,
+                          checked: gate.checked,
+                          skipped: gate.skipped,
+                          group: gate.group,
+                          unavailable: gate.unavailable,
+                        }
+                      : undefined,
                     sourceLang: srcLang,
                     targetLang: tgtLang,
                     langGroup: debugCtx.langGroup,
@@ -369,7 +394,7 @@ export default defineContentScript({
                     context,
                   );
 
-                  return { translations, sourceTexts, context };
+                  return { translations, sourceTexts, context, gateSkip, gate };
                 },
 
                 // Re-render translations on top of the (cached) inpainted base.
@@ -378,22 +403,63 @@ export default defineContentScript({
                   translations: Translations,
                   bboxes: Bbox[],
                 ) => {
-                  let inpaintedSrc = inpaintedSrcCache.get(src);
-                  let inpaintMethod: "telea" | "fast" | "fallback" | undefined;
+                  // Only regions we actually paint get inpainted: a gate-skipped
+                  // or empty region keeps its original text untouched (erasing
+                  // without painting was a latent defect for failed OCR too).
+                  const paintable = bboxes.filter((_, i) => translations[i]);
+                  const boxesKey = JSON.stringify(
+                    paintable.map((b) => [
+                      Math.round(b.x1),
+                      Math.round(b.y1),
+                      Math.round(b.x2),
+                      Math.round(b.y2),
+                    ]),
+                  );
+                  let cached = inpaintedSrcCache.get(src);
+                  let inpaintMethod:
+                    | "auto"
+                    | "telea"
+                    | "fast"
+                    | "fallback"
+                    | undefined;
                   let inpaintMs: number | undefined;
-                  if (!inpaintedSrc) {
+                  if (!cached || cached.boxesKey !== boxesKey) {
                     const tInpaint = performance.now();
-                    const res = await inpaintImage(src, bboxes);
+                    const res = await inpaintImage(src, paintable);
                     inpaintMs = performance.now() - tInpaint;
-                    inpaintedSrc = res.url;
+                    cached = { url: res.url, boxesKey };
+                    inpaintedSrcCache.set(src, cached);
                     inpaintMethod = res.method;
-                    inpaintedSrcCache.set(src, inpaintedSrc);
+
+                    const inpaintStats = res.regions
+                      ? {
+                          fill: res.regions.filter(
+                            (r) => r.method === "fill",
+                          ).length,
+                          denoise: res.regions.filter(
+                            (r) => r.method === "denoise",
+                          ).length,
+                          telea: res.regions.filter(
+                            (r) => r.method === "telea",
+                          ).length,
+                          rectTelea: res.regions.filter(
+                            (r) => r.method === "rect-telea",
+                          ).length,
+                          declined: res.regions.filter(
+                            (r) => r.method === "declined",
+                          ).length,
+                          skipped: res.regions.filter(
+                            (r) => r.method === "skipped",
+                          ).length,
+                        }
+                      : undefined;
 
                     // Attach inpainting details to the translate debug entry (same src).
                     const debugId = debugEntryIdBySrc.get(src);
                     if (debugId) {
                       await updateDebugEntry(debugId, {
                         inpaintMethod,
+                        inpaintStats,
                         inpaintError: res.error,
                         timing: { inpaint: inpaintMs },
                       });
@@ -401,7 +467,7 @@ export default defineContentScript({
                   }
 
                   const translatedSrc = await drawTranslations(
-                    inpaintedSrc,
+                    cached.url,
                     bboxes,
                     translations,
                   );

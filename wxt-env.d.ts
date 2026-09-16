@@ -5,12 +5,16 @@ declare module "*.svelte" {
   export default component;
 }
 
+type GateReason = "not-japanese" | "low-confidence";
+
 interface Bbox {
   x1: number;
   y1: number;
   x2: number;
   y2: number;
   confidence: number;
+  /** the script gate held this region back (optional, cache-compatible) */
+  gateSkip?: GateReason;
 }
 
 type Translations = string[];
@@ -71,7 +75,22 @@ interface DebugEntry {
   temperature?: number;
   serverSchema?: string;
   geminiModel?: string;
-  inpaintMethod?: "telea" | "fast" | "fallback";
+  inpaintMethod?: "auto" | "telea" | "fast" | "fallback";
+  gate?: {
+    mode: "off" | "cjk" | "other" | "auto";
+    checked: number;
+    skipped: number;
+    group?: string;
+    unavailable?: boolean;
+  };
+  inpaintStats?: {
+    fill: number;
+    denoise: number;
+    telea: number;
+    rectTelea: number;
+    declined: number;
+    skipped: number;
+  };
   inpaintError?: string;
   models: {
     detection?: string;
