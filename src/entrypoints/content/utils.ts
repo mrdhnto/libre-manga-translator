@@ -479,7 +479,7 @@ export function createImageObservers(
     if (img) wrapper.style.display = img.style.display;
   });
 
-  // Re-attaches wrapper when MangaDex remounts a fresh img element
+  // Re-attaches wrapper when SPA website remounts a fresh img element
   const domObserver = new MutationObserver(() => {
     // Debounce so we only react after MangaDex finishes all its mutations
     const allImgs = Array.from(
@@ -512,4 +512,84 @@ export function createImageObservers(
   });
 
   return { styleObserver, domObserver };
+}
+
+/**
+ * 32-bit FNV-1a hash returned as 8-character hex string.
+ * Used for deterministic cache keying and image src identification.
+ */
+export function quickHash(str: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+/**
+ * Resolves a reliable page number when URL regex returns 0 (e.g. MangaFire, Comix).
+ * 1. Image URL pathname / filename (e.g. /page-003.jpg, /03.webp, ?page=3)
+ * 2. DOM data attributes (data-page, data-number, data-index, id="page-N")
+ * 3. Ordinal index among manga images on the page
+ */
+export function resolveImagePageIndex(
+  img: HTMLImageElement,
+  srcUrl: string,
+  urlPageIndex: number,
+): number {
+  if (urlPageIndex > 0) return urlPageIndex;
+
+  // 1. Try image URL pathname / filename
+  if (srcUrl && !srcUrl.startsWith("data:") && !srcUrl.startsWith("blob:")) {
+    try {
+      const base =
+        typeof window !== "undefined" && window.location?.href
+          ? window.location.href
+          : "https://localhost/";
+      const parsed = new URL(srcUrl, base);
+      const filename = parsed.pathname.split("/").pop() || "";
+      const cleanName = filename.replace(/\.[a-z0-9]+$/i, "");
+      const match =
+        cleanName.match(/(?:page|p|img)?[-_]?(\d+)$/i) ||
+        parsed.search.match(/[?&](?:page|p|index)=(\d+)/i);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (!isNaN(num) && num > 0) return num;
+      }
+    } catch {
+      // Ignore URL parse errors
+    }
+  }
+
+  // 2. Try DOM data attributes on img or parent containers
+  const attrTargets = [
+    img,
+    img.closest("[data-page], [data-number], [data-index], [id*='page']"),
+  ];
+  for (const target of attrTargets) {
+    if (!target) continue;
+    const rawVal =
+      target.getAttribute("data-page") ||
+      target.getAttribute("data-number") ||
+      target.getAttribute("data-index") ||
+      target.id?.match(/page[-_]?(\d+)/i)?.[1];
+    if (rawVal) {
+      const num = parseInt(rawVal, 10);
+      if (!isNaN(num) && num >= 0) return num;
+    }
+  }
+
+  // 3. Positional index among manga images on the page
+  try {
+    const allImgs = Array.from(document.querySelectorAll("img")).filter(
+      (el) => el.naturalWidth > 300 && el.naturalHeight > 300,
+    );
+    const idx = allImgs.indexOf(img);
+    if (idx >= 0) return idx + 1;
+  } catch {
+    // Ignore
+  }
+
+  return 0;
 }

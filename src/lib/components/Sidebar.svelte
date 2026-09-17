@@ -301,8 +301,15 @@
 
   <!-- Panel -->
   <div
+    role="presentation"
     class="fixed top-0 right-0 bottom-0 w-84 max-w-[90vw] bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 shadow-2xl z-99999 flex flex-col font-sans border-l border-zinc-200 dark:border-zinc-800 pointer-events-auto"
     transition:fly={{ x: 340, duration: 250 }}
+    onkeydown={(e) => e.stopPropagation()}
+    onkeyup={(e) => e.stopPropagation()}
+    onkeypress={(e) => e.stopPropagation()}
+    onmousedown={(e) => e.stopPropagation()}
+    onpointerdown={(e) => e.stopPropagation()}
+    onwheel={(e) => e.stopPropagation()}
   >
     <!-- Header -->
     <div class="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 shrink-0">

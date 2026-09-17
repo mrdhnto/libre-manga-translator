@@ -85,7 +85,7 @@ browser.runtime.onMessage.addListener((msg, _, sendResponse) => {
           const backend = await detectBackend();
           try {
             const res = await translateLocal(
-              ocrResults.map((r) => r.text),
+              ocrResults.map((r) => (r.gateSkip ? "" : r.text)),
               targetLang,
               sourceLang,
               seriesContext,
@@ -110,7 +110,7 @@ browser.runtime.onMessage.addListener((msg, _, sendResponse) => {
         .then((ocrOut) => {
           const ocrResults = ocrOut.results;
           translateWithServer(
-            ocrResults.map((r) => r.text),
+            ocrResults.map((r) => (r.gateSkip ? "" : r.text)),
             targetLang,
             sourceLang,
             seriesContext,

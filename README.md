@@ -14,7 +14,7 @@
 
 Translate manga in your browser with freedom to choose how. Run everything on your device, offload to the cloud, or point at your own self-hosted LLM backend - you decide where your data goes.
 
-> **Build on [ComicTL](https://github.com/kiuyha/ComicTL)** by Ketut Shridhara, with the original three-way mode concept inspired by the experimental [Local Manga Translator](https://github.com/mrdhnto/local-manga-translator) proof-of-concept. Further enhanced by the **LMT Maintainer** with API Mode, self-hosted backends, OCR surfacing, editable translations, better on-page sidebar config, better debug module and the pure-JS Telea inpainting engine.
+> **Built upon [ComicTL](https://github.com/kiuyha/ComicTL)** by Ketut Shridhara, with the original three-way routing concept inspired by the experimental [Local Manga Translator](https://github.com/mrdhnto/local-manga-translator) proof-of-concept. Actively maintained and evolved by the **LMT Maintainer** with API Mode, an on-device script verification gate, an auto inpainting engine ladder, interactive OCR & translation editing, floating on-page config, and reader compatibility hardening.
 
 ---
 

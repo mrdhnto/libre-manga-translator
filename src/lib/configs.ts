@@ -89,7 +89,7 @@ export const DefaultConfig = {
   inpaintMethod: "auto",
 
   ocrAutoUpdate: true,
-  ocrMinConfidence: 0.75,
+  ocrMinConfidence: 0.7,
   ocrLangGroupMap, // Map source language to language group for model & dictionary selection
   ocrBatchSize: 4,
   ocrRecImgHeight: 48,

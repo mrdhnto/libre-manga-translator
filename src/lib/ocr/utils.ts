@@ -22,13 +22,13 @@ function getBackgroundBrightness(
 
 export function sliceImageDataIntoLines(imageData: ImageData): ImageData[] {
   const { width, height, data } = imageData;
+  if (height < 20 || width < 10) return [imageData];
 
   const grayPixels = new Uint8Array(width * height);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const i = (y * width + x) * 4;
       grayPixels[y * width + x] = Math.round(
-        // Standard Grayscale formula
         0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2],
       );
     }
@@ -36,15 +36,13 @@ export function sliceImageDataIntoLines(imageData: ImageData): ImageData[] {
 
   // Sort a copy of the pixels from darkest (0) to lightest (255)
   const sortedPixels = new Uint8Array(grayPixels).sort();
-  
-  // The 5th percentile is guaranteed to be the ink color
   const inkBrightness = sortedPixels[Math.floor(sortedPixels.length * 0.05)];
-  
-  // The 75th percentile of the edges is guaranteed to be the paper color
-  const bgBrightness = getBackgroundBrightness(grayPixels, width, height);
+  const bgBrightness = Math.max(
+    sortedPixels[Math.floor(sortedPixels.length * 0.9)],
+    getBackgroundBrightness(grayPixels, width, height),
+  );
 
-  // The threshold is 40% of the way between ink and bg
-  const threshold = inkBrightness + ((bgBrightness - inkBrightness) * 0.4); 
+  const threshold = inkBrightness + (bgBrightness - inkBrightness) * 0.45;
 
   const rowIntensities = new Array(height).fill(0);
   for (let y = 0; y < height; y++) {
@@ -54,16 +52,14 @@ export function sliceImageDataIntoLines(imageData: ImageData): ImageData[] {
     }
     rowIntensities[y] = count;
   }
-  const pixelThreshold = Math.max(3, width * 0.02);
-  
+  const pixelThreshold = Math.max(2, width * 0.015);
+
   const MIN_CONFIRM = 2;
-  const lines: ImageData[] = [];
+  const rawSpans: { start: number; end: number }[] = [];
   let inTextLine = false;
   let lineStartY = 0;
   let confirmCount = 0;
   let pendingStart = -1;
-  const PAD = 2; // idk the best most of the time
-  const minLineHeight = Math.max(4, Math.floor(height * 0.05));
 
   for (let y = 0; y <= height; y++) {
     const isText = y < height && rowIntensities[y] > pixelThreshold;
@@ -80,21 +76,68 @@ export function sliceImageDataIntoLines(imageData: ImageData): ImageData[] {
     } else {
       if (inTextLine) {
         inTextLine = false;
-        const start = Math.max(0, lineStartY - PAD);
-        const end = Math.min(height, y + PAD);
-        if (end - start > minLineHeight) {
-          lines.push(
-            new ImageData(
-              data.slice(start * width * 4, end * width * 4),
-              width,
-              end - start,
-            ),
-          );
-        }
+        rawSpans.push({ start: lineStartY, end: y });
       }
       pendingStart = -1;
       confirmCount = 0;
     }
+  }
+
+  if (rawSpans.length === 0) return [imageData];
+
+  // Merge nearby spans (gap <= 4px) to keep diacritics / split strokes with line
+  const mergedSpans: { start: number; end: number }[] = [];
+  for (const span of rawSpans) {
+    if (mergedSpans.length === 0) {
+      mergedSpans.push({ ...span });
+    } else {
+      const prev = mergedSpans[mergedSpans.length - 1];
+      if (span.start - prev.end <= 4) {
+        prev.end = span.end;
+      } else {
+        mergedSpans.push({ ...span });
+      }
+    }
+  }
+
+  const PAD_Y = 4;
+  const PAD_X = 4;
+  const minLineHeight = Math.max(6, Math.floor(height * 0.04));
+  const lines: ImageData[] = [];
+
+  for (const span of mergedSpans) {
+    const startY = Math.max(0, span.start - PAD_Y);
+    const endY = Math.min(height, span.end + PAD_Y);
+    const lineH = endY - startY;
+    if (lineH < minLineHeight) continue;
+
+    // Tight horizontal bounding box of ink pixels within this line
+    let minX = width;
+    let maxX = 0;
+    for (let y = startY; y < endY; y++) {
+      for (let x = 0; x < width; x++) {
+        if (grayPixels[y * width + x] < threshold) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+        }
+      }
+    }
+
+    const startX = minX < maxX ? Math.max(0, minX - PAD_X) : 0;
+    const endX = minX < maxX ? Math.min(width, maxX + PAD_X + 1) : width;
+    const lineW = endX - startX;
+    if (lineW < 6) continue;
+
+    const lineCanvas = new OffscreenCanvas(lineW, lineH);
+    const ctx = lineCanvas.getContext("2d")!;
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, lineW, lineH);
+
+    const tempCanvas = new OffscreenCanvas(width, height);
+    tempCanvas.getContext("2d")!.putImageData(imageData, 0, 0);
+    ctx.drawImage(tempCanvas, startX, startY, lineW, lineH, 0, 0, lineW, lineH);
+
+    lines.push(ctx.getImageData(0, 0, lineW, lineH));
   }
 
   return lines.length > 0 ? lines : [imageData];
@@ -105,30 +148,35 @@ export function normalizePolarity(imageData: ImageData): ImageData {
   const h = imageData.height;
   const data = imageData.data;
 
-  // Sample the perimeter to guess the background luminance
-  let edgeLuminanceSum = 0;
-  let edgePixelCount = 0;
-
+  // Sample perimeter to guess background luminance
+  const edgeSamples: number[] = [];
+  for (let x = 0; x < w; x++) {
+    const topIdx = x * 4;
+    const botIdx = ((h - 1) * w + x) * 4;
+    edgeSamples.push(
+      0.299 * data[topIdx] + 0.587 * data[topIdx + 1] + 0.114 * data[topIdx + 2],
+    );
+    edgeSamples.push(
+      0.299 * data[botIdx] + 0.587 * data[botIdx + 1] + 0.114 * data[botIdx + 2],
+    );
+  }
   for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      // Check if the pixel is on the outer edge of the canvas
-      if (x === 0 || x === w - 1 || y === 0 || y === h - 1) {
-        const i = (y * w + x) * 4;
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-
-        // Standard Grayscale formula
-        edgeLuminanceSum += 0.299 * r + 0.587 * g + 0.114 * b;
-        edgePixelCount++;
-      }
-    }
+    const leftIdx = (y * w) * 4;
+    const rightIdx = (y * w + (w - 1)) * 4;
+    edgeSamples.push(
+      0.299 * data[leftIdx] + 0.587 * data[leftIdx + 1] + 0.114 * data[leftIdx + 2],
+    );
+    edgeSamples.push(
+      0.299 * data[rightIdx] + 0.587 * data[rightIdx + 1] + 0.114 * data[rightIdx + 2],
+    );
   }
 
-  const avgBackgroundLuminance = edgeLuminanceSum / edgePixelCount;
+  edgeSamples.sort((a, b) => a - b);
+  // 75th percentile of edge is robust even if 1-2 sides touch panel border / dark art
+  const bgLuminance = edgeSamples[Math.floor(edgeSamples.length * 0.75)] ?? 255;
 
   // If the background is dark (< 128), INVERT the entire image
-  if (avgBackgroundLuminance < 128) {
+  if (bgLuminance < 128) {
     for (let i = 0; i < data.length; i += 4) {
       data[i] = 255 - data[i]; // R
       data[i + 1] = 255 - data[i + 1]; // G
@@ -145,20 +193,75 @@ const VERTICAL_LANGUAGES = [
   "Chinese (Simplified)",
   "Chinese (Traditional)",
   "Korean",
+  "Auto-Detect",
 ];
+
+function detectVerticalColumns(
+  bitmap: ImageBitmap,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): boolean {
+  if (w < 20 || h < 20) return false;
+  const canvas = new OffscreenCanvas(w, h);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  ctx.drawImage(bitmap, x, y, w, h, 0, 0, w, h);
+  const data = ctx.getImageData(0, 0, w, h).data;
+
+  const colSums = new Float32Array(w);
+  const rowSums = new Float32Array(h);
+  for (let r = 0; r < h; r++) {
+    for (let c = 0; c < w; c++) {
+      const idx = (r * w + c) * 4;
+      const lum =
+        0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+      if (lum < 140) {
+        colSums[c]++;
+        rowSums[r]++;
+      }
+    }
+  }
+
+  const colVar = getProfileVariance(colSums) / (h * h || 1);
+  const rowVar = getProfileVariance(rowSums) / (w * w || 1);
+  return colVar > rowVar * 1.15;
+}
+
+function getProfileVariance(arr: Float32Array): number {
+  if (arr.length === 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < arr.length; i++) sum += arr[i];
+  const mean = sum / arr.length;
+  let v = 0;
+  for (let i = 0; i < arr.length; i++) {
+    const d = arr[i] - mean;
+    v += d * d;
+  }
+  return v / arr.length;
+}
 
 export function cropBubbleFromImage(
   bitmap: ImageBitmap,
   bbox: Bbox,
   sourceLanguage: string,
 ) {
-  const { x1, y1, x2, y2 } = bbox;
+  const x1 = Math.max(0, Math.min(bitmap.width - 1, Math.round(bbox.x1)));
+  const y1 = Math.max(0, Math.min(bitmap.height - 1, Math.round(bbox.y1)));
+  const x2 = Math.max(x1 + 1, Math.min(bitmap.width, Math.round(bbox.x2)));
+  const y2 = Math.max(y1 + 1, Math.min(bitmap.height, Math.round(bbox.y2)));
   const w = x2 - x1;
   const h = y2 - y1;
 
-  const isTallBox = h / w >= 1.5;
   const isVerticalLanguage = VERTICAL_LANGUAGES.includes(sourceLanguage);
-  const shouldRotate = isTallBox && isVerticalLanguage;
+  let shouldRotate = false;
+  if (isVerticalLanguage) {
+    if (h / w >= 1.25) {
+      shouldRotate = true;
+    } else if (h / w >= 0.8) {
+      shouldRotate = detectVerticalColumns(bitmap, x1, y1, w, h);
+    }
+  }
 
   const outW = shouldRotate ? h : w;
   const outH = shouldRotate ? w : h;
@@ -167,12 +270,12 @@ export function cropBubbleFromImage(
   const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
 
   if (shouldRotate) {
-    // Rotate 90° CCW for Japanese/Chinese/Korean vertical text
+    // Rotate 90° CCW for vertical text
     ctx.translate(outW / 2, outH / 2);
     ctx.rotate(-Math.PI / 2);
     ctx.drawImage(bitmap, x1, y1, w, h, -h / 2, -w / 2, h, w);
   } else {
-    // Standard horizontal draw for Spanish, English, Indonesian, etc.
+    // Standard horizontal draw
     ctx.drawImage(bitmap, x1, y1, w, h, 0, 0, w, h);
   }
 
@@ -199,50 +302,23 @@ export function preprocessCrop(
   const srcCanvas = new OffscreenCanvas(crop.width, crop.height);
   srcCanvas.getContext("2d")!.putImageData(crop, 0, 0);
 
-  // If the crop is already smaller than recImgHeight, upscale with a sharper
-  // interpolation by drawing onto a 2x canvas first, then down to target
-  const needsUpscale = crop.height < recImgHeight;
-  const intermediateH = needsUpscale ? recImgHeight * 2 : crop.height;
-  const intermediateW = needsUpscale ? Math.round(scaledW * 2) : crop.width;
-
-  let sourceForResize: OffscreenCanvas = srcCanvas;
-  if (needsUpscale) {
-    const upscaled = new OffscreenCanvas(intermediateW, intermediateH);
-    const upCtx = upscaled.getContext("2d")!;
-    upCtx.imageSmoothingEnabled = false; // nearest-neighbour for upscale - keeps edges sharp
-    upCtx.drawImage(
-      srcCanvas,
-      0,
-      0,
-      crop.width,
-      crop.height,
-      0,
-      0,
-      intermediateW,
-      intermediateH,
-    );
-    sourceForResize = upscaled;
-  }
-
   const resized = new OffscreenCanvas(scaledW, recImgHeight);
   const ctx = resized.getContext("2d")!;
   ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high"; // bilinear for the final downscale
+  ctx.imageSmoothingQuality = "high";
   ctx.drawImage(
-    sourceForResize,
+    srcCanvas,
     0,
     0,
-    intermediateW,
-    intermediateH,
+    crop.width,
+    crop.height,
     0,
     0,
     scaledW,
     recImgHeight,
   );
 
-  const raw = resized
-    .getContext("2d")!
-    .getImageData(0, 0, scaledW, recImgHeight).data;
+  const raw = ctx.getImageData(0, 0, scaledW, recImgHeight).data;
   const channels = 3;
   const buffer = new Float32Array(channels * recImgHeight * targetW);
 
@@ -332,24 +408,35 @@ export function ctcDecode(
 
 
 export function boostContrast(imageData: ImageData): ImageData {
-  const data = new Uint8ClampedArray(imageData.data);
-  for (let i = 0; i < data.length; i += 4) {
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-    
-    // Calculate grayscale luminance
-    const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
-    
-    // If it is darker than 150, darken it further. If lighter, push to white.
-    const multiplier = luminance < 150 ? 0.7 : 1.3; 
-    
-    data[i] = Math.min(255, Math.max(0, r * multiplier));
-    data[i + 1] = Math.min(255, Math.max(0, g * multiplier));
-    data[i + 2] = Math.min(255, Math.max(0, b * multiplier));
-    // Keep alpha intact
+  const { width, height, data } = imageData;
+  const n = width * height;
+  if (n === 0) return imageData;
+
+  const gray = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const idx = i * 4;
+    gray[i] = Math.round(
+      0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2],
+    );
   }
-  return new ImageData(data, imageData.width, imageData.height);
+
+  const sorted = new Uint8Array(gray).sort();
+  const pLow = sorted[Math.floor(n * 0.04)];
+  const pHigh = sorted[Math.floor(n * 0.96)];
+  const range = pHigh - pLow;
+
+  if (range < 15) return imageData;
+
+  const out = new Uint8ClampedArray(data);
+  for (let i = 0; i < n; i++) {
+    const idx = i * 4;
+    for (let c = 0; c < 3; c++) {
+      const val = data[idx + c];
+      const stretched = ((val - pLow) / range) * 255;
+      out[idx + c] = Math.min(255, Math.max(0, Math.round(stretched)));
+    }
+  }
+  return new ImageData(out, width, height);
 }
 
 export function padImageForOCR(imageData: ImageData, padding = 4): ImageData {

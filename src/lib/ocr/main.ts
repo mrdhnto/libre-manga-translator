@@ -72,12 +72,15 @@ export async function textRecognise(
   const regionLines: ImageData[][] = bboxes.map((bbox) => {
     const rawCrop = cropBubbleFromImage(bitmap, bbox, sourceLang);
     const normalizedCrop = normalizePolarity(rawCrop);
+    const boostedCrop = boostContrast(normalizedCrop);
     const bubbleH = bbox.y2 - bbox.y1;
     const bubbleW = bbox.x2 - bbox.x1;
-    const isSmall = bubbleH < 80 || bubbleW < 80;
-    return isSmall
-      ? [normalizedCrop]
-      : sliceImageDataIntoLines(normalizedCrop);
+    const isSingleLine = Math.min(bubbleH, bubbleW) < 24;
+    return isSingleLine
+      ? [padImageForOCR(boostedCrop, 4)]
+      : sliceImageDataIntoLines(boostedCrop).map((line) =>
+          padImageForOCR(line, 4),
+        );
   });
 
   // --- script-ID pass (before session load: Auto picks the group from it) ---
@@ -191,20 +194,20 @@ export async function textRecognise(
           sourceLang,
         );
         const normalizedCrop = normalizePolarity(rawCrop);
-        const paddedCrop = padImageForOCR(normalizedCrop, 4);
-        const boostedCrop = boostContrast(paddedCrop);
+        const boostedCrop = boostContrast(normalizedCrop);
+        const paddedCrop = padImageForOCR(boostedCrop, 6);
 
         const bubbleH = bboxes[bboxIdx].y2 - bboxes[bboxIdx].y1;
         const bubbleW = bboxes[bboxIdx].x2 - bboxes[bboxIdx].x1;
-        const isSmall = bubbleH < 80 || bubbleW < 80;
+        const isSingleLine = Math.min(bubbleH, bubbleW) < 24;
 
-        const lines = isSmall
-          ? [boostedCrop]
-          : sliceImageDataIntoLines(boostedCrop);
+        const lines = isSingleLine
+          ? [paddedCrop]
+          : sliceImageDataIntoLines(paddedCrop);
 
         return lines.map((imageData) => ({
           originalBboxIndex: retryIdx,
-          imageData,
+          imageData: padImageForOCR(imageData, 4),
         }));
       })
       .flat();
@@ -215,7 +218,7 @@ export async function textRecognise(
         retrycrops,
         batchSize,
         recImgHeight,
-        minConfidence * 0.7, // Lower confidence to reduce false positives
+        minConfidence * 0.7, // Lower confidence to reduce false negatives on hard crops
         failedIndexes.length,
         langGroup,
       );
@@ -242,12 +245,8 @@ export async function textRecognise(
       pageLabel,
     );
     if (reason) {
-      result[i] = {
-        text: "",
-        confidence: 0,
-        failed: false,
-        gateSkip: reason,
-      };
+      // Keep recognized text so user can view/edit in editor; flag gateSkip for renderer
+      result[i].gateSkip = reason;
       skipped++;
     }
   }
@@ -326,10 +325,12 @@ async function runBatches(
       const textLen = decoded.text.trim().length;
 
       if (decoded.confidence >= minConfidence) {
-        // If it's short text demand a much higher confidence
-        const isShortHallucination = textLen <= 4 && decoded.confidence < 0.85;
+        // Allow textLen >= 2 if confidence >= minConfidence.
+        // Single character (length === 1) demands higher confidence to prevent noise hallucinations.
+        const isSingleCharNoise =
+          textLen === 1 && decoded.confidence < Math.max(minConfidence, 0.75);
 
-        if (!isShortHallucination) {
+        if (!isSingleCharNoise && textLen > 0) {
           const bboxIdx = batchData[i].originalBboxIndex;
           const target = stitchedResults[bboxIdx];
 
