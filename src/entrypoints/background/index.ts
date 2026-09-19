@@ -50,6 +50,12 @@ export default defineBackground(() => {
     }
   });
 
+  // Re-probe on every browser launch: an install-time value goes stale when
+  // the user later flips GPU prefs (e.g. dom.webgpu.enabled / JSPI flags).
+  browser.runtime.onStartup.addListener(async () => {
+    await storage.setItem("local:active-device", await detectHardware());
+  });
+
   // Send message when context menu is clicked
   browser.contextMenus.onClicked.addListener(async (info, tab) => {
     if (!tab?.id) return;

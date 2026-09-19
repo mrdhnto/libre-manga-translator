@@ -91,6 +91,8 @@ interface DebugEntry {
   llmPerf?: LlmPerf;
   /** local engine that served this request (webgpu mode only) */
   engine?: "wllama" | "webllm";
+  /** why a webgpu-mode request fell back to wasm CPU (absent when WebGPU ran) */
+  gpuUnavailableReason?: string;
   ocrMinConfidence?: number;
   detectionMinConfidence?: number;
   temperature?: number;

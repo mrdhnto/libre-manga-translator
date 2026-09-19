@@ -359,7 +359,7 @@ export default defineContentScript({
                     return resp;
                   }
 
-                  const { translations, context, sourceTexts, gateSkip, gate, llmPerf } =
+                  const { translations, context, sourceTexts, gateSkip, gate, llmPerf, gpuUnavailableReason } =
                     resp;
                   const timing = {
                     total: duration,
@@ -398,6 +398,9 @@ export default defineContentScript({
                           llmPerf,
                           engine: llmModelDef(debugCtx.llmModel).engine,
                         }
+                      : {}),
+                    ...(curMode === "webgpu" && gpuUnavailableReason
+                      ? { gpuUnavailableReason }
                       : {}),
                     ocrMinConfidence: debugCtx.ocrMinConfidence,
                     detectionMinConfidence: debugCtx.detectionMinConfidence,

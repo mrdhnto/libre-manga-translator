@@ -88,12 +88,14 @@ export default defineConfig({
       },
     ],
     content_security_policy: {
-      // worker-src blob: lets wllama construct its inference worker from
-      // bundled code via a blob URL (no remote code executes — the worker
-      // source ships inside the package). Without it Firefox blocks the
-      // worker and model loading hangs silently.
+      // Default is Chrome-strict (Web Store rejects blob: in worker-src).
+      // The build:manifestGenerated hook below appends blob: for Firefox,
+      // where wllama must construct its inference worker from a blob URL
+      // (no remote code executes — the worker source ships inside the
+      // package). Without it Firefox blocks the worker and model loading
+      // hangs silently.
       extension_pages:
-        "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self' blob:",
+        "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'",
     },
     // Fixed add-on ID: Firefox disables storage.sync for temporary install
     // IDs, which breaks onboarding/settings on sideloaded dev builds. AMO
@@ -108,12 +110,19 @@ export default defineConfig({
   // "offscreen" is Chrome-only: Firefox rejects it with a manifest
   // warning (and has no offscreen API — inference runs in the background
   // page, see lib/inference.ts). Strip it from Firefox builds only.
+  // Same hook also swaps the CSP per build: Chrome keeps the strict
+  // default above, Firefox gains worker-src blob: for the wllama worker.
   hooks: {
     "build:manifestGenerated": (wxt: any, manifest: any) => {
-      if (wxt.config.browser === "firefox" && Array.isArray(manifest.permissions)) {
-        manifest.permissions = manifest.permissions.filter(
-          (p: unknown) => p !== "offscreen",
-        );
+      if (wxt.config.browser === "firefox") {
+        if (Array.isArray(manifest.permissions)) {
+          manifest.permissions = manifest.permissions.filter(
+            (p: unknown) => p !== "offscreen",
+          );
+        }
+        manifest.content_security_policy ??= {};
+        manifest.content_security_policy.extension_pages =
+          "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self' blob:";
       }
     },
   },

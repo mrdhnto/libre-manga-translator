@@ -71,7 +71,7 @@ async function ensureWllama(
   const params = { n_ctx: 4096 };
   const load = (async () => {
     try {
-      await instance.loadModel([blob], params);
+      await instance.loadModel([blob], { ...params, n_gpu_layers: 999999 });
     } catch (err) {
       // WebGPU-by-default builds can fail where WebGPU is unavailable or
       // blocked: retry pure CPU before giving up.
@@ -134,6 +134,55 @@ export async function deleteWllamaCache(def: LlmModelDef): Promise<void> {
 
 export function isWllamaModelLoaded(id: string): boolean {
   return !!wllama && loadedModelId === id && wllama.isModelLoaded();
+}
+
+export interface WllamaGpuCapability {
+  ok: boolean;
+  reason: "webgpu-ready" | "no-navigator-gpu" | "no-jspi" | "no-adapter";
+  /** human-readable cause, persisted to the debug log when WebGPU is unusable */
+  detail: string;
+}
+
+/**
+ * Pre-check whether this browser can run wllama on WebGPU. The three
+ * probes mirror @wllama/wllama src/utils.ts (isSupportWebGPU /
+ * isSupportJSPI) plus an adapter request; they are inlined so the check
+ * runs without instantiating Wllama. An adapter alone is NOT enough on
+ * Firefox: without JSPI wllama disables WebGPU and falls back to CPU.
+ */
+export async function canUseWllamaWebGPU(): Promise<WllamaGpuCapability> {
+  if (!(navigator as any)?.gpu) {
+    return {
+      ok: false,
+      reason: "no-navigator-gpu",
+      detail: "navigator.gpu missing — enable dom.webgpu.enabled in about:config",
+    };
+  }
+  if (!(WebAssembly as any)?.Suspending) {
+    return {
+      ok: false,
+      reason: "no-jspi",
+      detail:
+        "WebAssembly.Suspending (JSPI) missing — enable javascript.options.wasm_js_promise_integration in about:config",
+    };
+  }
+  try {
+    const adapter = await (navigator as any).gpu.requestAdapter();
+    if (!adapter) {
+      return {
+        ok: false,
+        reason: "no-adapter",
+        detail: "navigator.gpu present but requestAdapter() returned null",
+      };
+    }
+  } catch (e) {
+    return {
+      ok: false,
+      reason: "no-adapter",
+      detail: `requestAdapter() threw: ${(e as Error)?.message ?? String(e)}`,
+    };
+  }
+  return { ok: true, reason: "webgpu-ready", detail: "WebGPU adapter + JSPI available" };
 }
 
 async function runWllamaModel(

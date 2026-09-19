@@ -10,6 +10,8 @@
     <img src="https://img.shields.io/badge/Framework-Svelte%205%20%2B%20WXT-ff3e00?style=for-the-badge&logo=svelte" alt="Svelte 5">
     <img src="https://img.shields.io/badge/License-MIT-00ff7f?style=for-the-badge" alt="License">
   </p>
+
+  > ⚠️ **`firefox-wllama` branch variant** — this branch is an independent Firefox-only variant. The stock WebLLM/MLC engine chunk (~5.8 MB) exceeds Firefox AMO's ~2 MB per-`.js` limit, so this branch swaps the local LLM to wllama GGUF on Firefox only (`src/lib/wllama.ts`, models in `src/lib/configs.ts`). Chrome, Gemini Mode, and API Mode are unaffected. After this variant is approved on AMO, a return to the standard MLC/WebLLM engine on Firefox is planned to restore GPU-parity. Trade-off in the meantime: wllama can fall back to CPU inference even with GPU layers requested, making local translation noticeably slower and CPU-bound. See [docs/technical.md](docs/technical.md) "Local LLM backends" for the engine table.
 </div>
 
 Translate manga in your browser with freedom to choose how. Run everything on your device, offload to the cloud, or point at your own self-hosted LLM backend - you decide where your data goes.

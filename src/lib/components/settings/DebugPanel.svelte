@@ -242,6 +242,14 @@
                     : "-"}
                 </div>
               {/if}
+              {#if log.mode === "webgpu" && log.backend === "wasm" && log.gpuUnavailableReason}
+                <div
+                  class="col-span-2 text-amber-600 dark:text-amber-400"
+                  title="{log.gpuUnavailableReason}"
+                >
+                  GPU unavailable: {log.gpuUnavailableReason}
+                </div>
+              {/if}
             </div>
 
             <!-- Models & pipeline metadata -->
