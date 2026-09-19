@@ -80,20 +80,27 @@ export const DefaultConfig = {
 
   detectionMinConfidence: 0.5,
   detectionAutoUpdate: true,
-  detectionModelRepo: env.detectionModelRepo,
+  detectionModelRepo: env.yoloDetectionModelRepo,
+  rtdetrModelRepo: env.rtdetrModelRepo,
+  comicTextDetectorUrl: env.comicTextDetectorUrl,
   detectionModelPath: (model: string): `${string}.onnx` => `onnx/${model}.onnx`,
 
   // Inpainting method: "auto" (engine ladder: fitted mask -> planar fill ->
   // denoise -> Telea, each rung decline-gated) | "telea" (legacy full-frame
   // fast-marching) | "fast" (edge-blend)
   inpaintMethod: "auto",
+  inpaintLama: false,
+  lamaRepo: env.lamaInpaintModelRepo,
+  lamaModelPath: "lama-manga.onnx" as `${string}.onnx`,
 
+  ocrEngine: "paddle",
   ocrAutoUpdate: true,
   ocrMinConfidence: 0.7,
   ocrLangGroupMap, // Map source language to language group for model & dictionary selection
   ocrBatchSize: 4,
   ocrRecImgHeight: 48,
-  ocrRepo: env.ocrModelRepo,
+  ocrRepo: env.paddleOCRModelRepo,
+  mangaOcrRepo: env.mangaOCRModelRepo,
   ocrModelPath: (langGroup: string): `${string}.onnx` =>
     `languages/${langGroup}/rec.onnx`,
   ocrDictPath: (langGroup: string) => `languages/${langGroup}/dict.txt`,
@@ -118,8 +125,30 @@ export const DefaultConfig = {
     { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite" },
   ],
   detectionModels: [
-    { id: "yolo26n", label: "YOLO26-Nano" },
-    { id: "yolo26s", label: "YOLO26-Small" },
+    {
+      id: "yolo26n",
+      label: "YOLO26-Nano",
+      size: "2.4 MB",
+      desc: "Fast & lightweight (default)",
+    },
+    {
+      id: "yolo26s",
+      label: "YOLO26-Small",
+      size: "9.5 MB",
+      desc: "Higher accuracy for dense text",
+    },
+    {
+      id: "comic-bubble",
+      label: "Comic Bubble Detector (RT-DETR)",
+      size: "11.1 MB",
+      desc: "Bubble & free text detection (Apache-2.0)",
+    },
+    {
+      id: "comic-text-detector",
+      label: "Comic Text Detector & Segmentation",
+      size: "94.7 MB",
+      desc: "Text boxes + pixel segmentation mask (GPL-3.0)",
+    },
   ],
   llmModels: [
     {

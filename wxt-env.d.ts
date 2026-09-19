@@ -15,6 +15,8 @@ interface Bbox {
   confidence: number;
   /** the script gate held this region back (optional, cache-compatible) */
   gateSkip?: GateReason;
+  /** all ladder inpaint rungs declined this region */
+  inpaintDeclined?: boolean;
 }
 
 type Translations = string[];

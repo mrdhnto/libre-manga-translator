@@ -890,6 +890,23 @@ function applyBboxesSort() {
             </button>
           </div>
         {/if}
+        {#if box.inpaintDeclined && !box.gateSkip}
+          <div
+            class="absolute border-2 border-dotted border-rose-500/80 rounded-sm pointer-events-none z-30"
+            style:left="{box.x1 * scaleX}px"
+            style:top="{box.y1 * scaleY}px"
+            style:width="{(box.x2 - box.x1) * scaleX}px"
+            style:height="{(box.y2 - box.y1) * scaleY}px"
+            title="Inpainting declined: background could not be cleaned cleanly. Original paper retained."
+          >
+            <div
+              class="pointer-events-auto absolute -top-4 right-0 bg-rose-500/90 text-white text-[9px] font-mono px-1 rounded shadow"
+              title="Inpainting declined: all ladder rungs failed quality checks"
+            >
+              Declined
+            </div>
+          </div>
+        {/if}
       {/each}
     {/if}
     <!-- Floating action cluster beside the image -->

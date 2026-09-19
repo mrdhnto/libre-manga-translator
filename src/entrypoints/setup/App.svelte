@@ -19,6 +19,7 @@
   import { MLCEngine, deleteModelAllInfoInCache } from "@mlc-ai/web-llm";
   import { untrack } from "svelte";
   import { env } from "@/lib/env";
+  import { fetchAndCacheWithProgress, isArtifactCached } from "@/lib/utils";
 
   type Step =
     | "welcome"
@@ -27,15 +28,9 @@
     | "mode"
     | "llm"
     | "gemini"
-    | "api";
-  const WIZARD_STEPS: Step[] = [
-    "privacy",
-    "detection",
-    "mode",
-    "llm",
-    "gemini",
-    "api",
-  ];
+    | "api"
+    | "ocr"
+    | "inpaint";
 
   let step = $state<Step>("welcome");
   let isModelOnlyMode = $state(false);
@@ -45,13 +40,15 @@
   let privacyLoading = $state(false);
   let privacyFetchError = $state(false);
   let acceptedPolicy = $state(false);
-  let shareData = $state(true);
+  let shareData = $state(false);
 
   // Detection step
   let detectionModel = $state(DefaultConfig.detectionModels[0].id);
   let prevDetectionModel = untrack(() => detectionModel);
   let detectionPrefetching = $state(false);
   let detectionPrefetched = $state(false);
+  let detectionProgress = $state(0);
+  let detectionProgressText = $state("");
   let detectionError = $state<string | null>(null);
 
   // Mode step
@@ -63,6 +60,22 @@
   let serverModel = $state(DefaultConfig.serverModel);
   let useServerApiKey = $state(DefaultConfig.useServerApiKey);
   let serverApiKey = $state(DefaultConfig.serverApiKey);
+
+  // OCR step
+  let selectedOcrEngine = $state(DefaultConfig.ocrEngine);
+  let ocrDownloading = $state(false);
+  let ocrDownloaded = $state(false);
+  let ocrProgress = $state(0);
+  let ocrProgressText = $state("");
+  let ocrError = $state<string | null>(null);
+
+  // Inpaint step
+  let enableLamaInpaint = $state(DefaultConfig.inpaintLama);
+  let lamaDownloading = $state(false);
+  let lamaDownloaded = $state(false);
+  let lamaProgress = $state(0);
+  let lamaProgressText = $state("");
+  let lamaError = $state<string | null>(null);
 
   // LLM step
   let selectedLlmModel = $state(DefaultConfig.llmModels[0].id);
@@ -112,19 +125,52 @@
     }
   }
 
-  // Auto-prefetch detection model whenever step is "detection" or model selection changes
   $effect(() => {
     if (step === "detection" && detectionModel) {
-      prefetchDetection();
+      if (prevDetectionModel !== detectionModel) {
+        detectionPrefetched = false;
+        prevDetectionModel = detectionModel;
+      }
+      checkDetectionCache().then((cached) => {
+        if (!cached && !detectionPrefetching) {
+          prefetchDetection();
+        }
+      });
     }
-    if (prevDetectionModel !== detectionModel) {
-      detectionPrefetched = false;
+  });
+
+  $effect(() => {
+    if (step === "ocr" && selectedOcrEngine) {
+      checkOcrStatus().then((cached) => {
+        if (!cached && !ocrDownloading) {
+          startOcrDownload();
+        }
+      });
+    }
+  });
+
+  $effect(() => {
+    if (step === "inpaint") {
+      checkLamaStatus().then((cached) => {
+        if (enableLamaInpaint && !cached && !lamaDownloading) {
+          startLamaDownload();
+        }
+      });
     }
   });
 
   async function goTo(next: Step) {
     if (next === "privacy" && !privacyMarkdown && !privacyLoading) {
       fetchPrivacy();
+    }
+    if (next === "detection") {
+      checkDetectionCache();
+    }
+    if (next === "ocr") {
+      checkOcrStatus();
+    }
+    if (next === "inpaint") {
+      checkLamaStatus();
     }
     step = next;
   }
@@ -230,23 +276,184 @@
       );
   }
 
+  async function checkDetectionCache(): Promise<boolean> {
+    detectionError = null;
+    let cached = false;
+    if (detectionModel === "comic-bubble") {
+      cached = await isArtifactCached(
+        DefaultConfig.rtdetrModelRepo,
+        "detector-v4-s_int8.onnx",
+      );
+    } else if (detectionModel === "comic-text-detector") {
+      cached = await isArtifactCached(
+        "direct-model-cache",
+        DefaultConfig.comicTextDetectorUrl,
+      );
+    } else {
+      cached = await isArtifactCached(
+        DefaultConfig.detectionModelRepo,
+        DefaultConfig.detectionModelPath(detectionModel),
+      );
+    }
+    detectionPrefetched = cached;
+    return cached;
+  }
+
   async function prefetchDetection() {
-    if (detectionPrefetched) return;
     detectionPrefetching = true;
     detectionError = null;
-    detectionPrefetched = false;
+    detectionProgress = 0;
+    detectionProgressText = "Connecting...";
     try {
-      await browser.runtime.sendMessage({
-        type: "PREFETCH_MODEL",
-        data: { type: "detection", data: detectionModel },
-      });
+      const isCached = await checkDetectionCache();
+      if (isCached) {
+        detectionPrefetched = true;
+        detectionProgress = 100;
+        detectionPrefetching = false;
+        return;
+      }
+
+      const onProgress = (loaded: number, total: number) => {
+        const pct = total > 0 ? Math.round((loaded / total) * 100) : 0;
+        detectionProgress = pct;
+        detectionProgressText = `${(loaded / 1024 / 1024).toFixed(1)} MB${total > 0 ? ` / ${(total / 1024 / 1024).toFixed(1)} MB` : ""}`;
+      };
+
+      if (detectionModel === "comic-bubble") {
+        await fetchAndCacheWithProgress(
+          DefaultConfig.rtdetrModelRepo,
+          "detector-v4-s_int8.onnx",
+          onProgress,
+        );
+      } else if (detectionModel === "comic-text-detector") {
+        await fetchAndCacheWithProgress(
+          "direct-model-cache",
+          DefaultConfig.comicTextDetectorUrl,
+          onProgress,
+        );
+      } else {
+        await fetchAndCacheWithProgress(
+          DefaultConfig.detectionModelRepo,
+          DefaultConfig.detectionModelPath(detectionModel),
+          onProgress,
+        );
+      }
       detectionPrefetched = true;
+      detectionProgress = 100;
       prevDetectionModel = detectionModel;
     } catch (err: any) {
       detectionError =
-        err?.message ?? "Could not cache the model. You can continue anyway.";
+        err?.message ?? "Could not cache the model. Please check connection and retry.";
     } finally {
       detectionPrefetching = false;
+    }
+  }
+
+  async function checkOcrStatus(): Promise<boolean> {
+    ocrError = null;
+    let cached = false;
+    if (selectedOcrEngine === "manga-ocr") {
+      cached =
+        (await isArtifactCached(DefaultConfig.mangaOcrRepo, "encoder_model.onnx")) &&
+        (await isArtifactCached(DefaultConfig.mangaOcrRepo, "decoder_model.onnx"));
+    } else {
+      cached = await isArtifactCached(
+        DefaultConfig.ocrRepo,
+        DefaultConfig.ocrModelPath("chinese"),
+      );
+    }
+    ocrDownloaded = cached;
+    return cached;
+  }
+
+  async function startOcrDownload() {
+    ocrDownloading = true;
+    ocrError = null;
+    ocrProgress = 0;
+    ocrProgressText = "Preparing download...";
+    try {
+      if (selectedOcrEngine === "manga-ocr") {
+        ocrProgressText = "Downloading encoder (1/2)...";
+        await fetchAndCacheWithProgress(
+          DefaultConfig.mangaOcrRepo,
+          "encoder_model.onnx",
+          (loaded, total) => {
+            const pct = total > 0 ? Math.round((loaded / total) * 50) : 0;
+            ocrProgress = pct;
+            ocrProgressText = `Encoder: ${(loaded / 1024 / 1024).toFixed(1)} MB${total > 0 ? ` / ${(total / 1024 / 1024).toFixed(1)} MB` : ""}`;
+          },
+        );
+        ocrProgressText = "Downloading decoder (2/2)...";
+        await fetchAndCacheWithProgress(
+          DefaultConfig.mangaOcrRepo,
+          "decoder_model.onnx",
+          (loaded, total) => {
+            const pct = total > 0 ? 50 + Math.round((loaded / total) * 50) : 50;
+            ocrProgress = pct;
+            ocrProgressText = `Decoder: ${(loaded / 1024 / 1024).toFixed(1)} MB${total > 0 ? ` / ${(total / 1024 / 1024).toFixed(1)} MB` : ""}`;
+          },
+        );
+        await fetchAndCacheWithProgress(DefaultConfig.mangaOcrRepo, "vocab.txt");
+      } else {
+        await fetchAndCacheWithProgress(
+          DefaultConfig.ocrRepo,
+          DefaultConfig.ocrModelPath("chinese"),
+          (loaded, total) => {
+            const pct = total > 0 ? Math.round((loaded / total) * 100) : 0;
+            ocrProgress = pct;
+            ocrProgressText = `${(loaded / 1024 / 1024).toFixed(1)} MB${total > 0 ? ` / ${(total / 1024 / 1024).toFixed(1)} MB` : ""}`;
+          },
+        );
+        await fetchAndCacheWithProgress(
+          DefaultConfig.ocrRepo,
+          DefaultConfig.ocrDictPath("chinese"),
+        );
+      }
+      ocrDownloaded = true;
+      ocrProgress = 100;
+    } catch (err: any) {
+      ocrError = err?.message ?? "Failed to download OCR model weights.";
+    } finally {
+      ocrDownloading = false;
+    }
+  }
+
+  async function checkLamaStatus(): Promise<boolean> {
+    lamaError = null;
+    if (!enableLamaInpaint) {
+      lamaDownloaded = false;
+      return false;
+    }
+    const cached = await isArtifactCached(
+      DefaultConfig.lamaRepo,
+      DefaultConfig.lamaModelPath,
+    );
+    lamaDownloaded = cached;
+    return cached;
+  }
+
+  async function startLamaDownload() {
+    if (!enableLamaInpaint) return;
+    lamaDownloading = true;
+    lamaError = null;
+    lamaProgress = 0;
+    lamaProgressText = "Preparing download...";
+    try {
+      await fetchAndCacheWithProgress(
+        DefaultConfig.lamaRepo,
+        DefaultConfig.lamaModelPath,
+        (loaded, total) => {
+          const pct = total > 0 ? Math.round((loaded / total) * 100) : 0;
+          lamaProgress = pct;
+          lamaProgressText = `${(loaded / 1024 / 1024).toFixed(1)} MB${total > 0 ? ` / ${(total / 1024 / 1024).toFixed(1)} MB` : ""}`;
+        },
+      );
+      lamaDownloaded = true;
+      lamaProgress = 100;
+    } catch (err: any) {
+      lamaError = err?.message ?? "Failed to download LaMa model weights.";
+    } finally {
+      lamaDownloading = false;
     }
   }
 
@@ -291,19 +498,21 @@
       { key: "sync:share-data", value: shareData },
       { key: "sync:detection-model", value: detectionModel },
       { key: "sync:current-mode", value: selectedMode },
+      { key: "sync:ocr-engine", value: selectedOcrEngine },
+      { key: "sync:inpaint-lama", value: enableLamaInpaint },
       ...(selectedMode === "gemini" && geminiKey.trim()
-        ? ([{ key: "sync:gemini-key", value: geminiKey.trim() }] as any)
+        ? ([{ key: "local:gemini-key", value: geminiKey.trim() }] as any)
         : []),
       ...(selectedMode === "api"
         ? ([
-            { key: "sync:server-host", value: serverHost.trim() },
-            { key: "sync:server-schema", value: serverSchema },
-            { key: "sync:server-model", value: serverModel.trim() },
-            { key: "sync:use-server-api-key", value: useServerApiKey },
+            { key: "local:server-host", value: serverHost.trim() },
+            { key: "local:server-schema", value: serverSchema },
+            { key: "local:server-model", value: serverModel.trim() },
+            { key: "local:use-server-api-key", value: useServerApiKey },
             ...(useServerApiKey && serverApiKey.trim()
               ? [
                   {
-                    key: "sync:server-api-key",
+                    key: "local:server-api-key",
                     value: serverApiKey.trim(),
                   },
                 ]
@@ -317,11 +526,18 @@
   let parsedPrivacy = $derived(
     privacyMarkdown ? parseMarkdown(privacyMarkdown) : "",
   );
-  let wizardStepIndex = $derived(WIZARD_STEPS.indexOf(step as any));
+  let activeWizardSteps = $derived<Step[]>(
+    selectedMode === "gemini"
+      ? ["privacy", "detection", "mode", "gemini"]
+      : selectedMode === "api"
+        ? ["privacy", "detection", "mode", "api", "ocr", "inpaint"]
+        : ["privacy", "detection", "mode", "llm", "ocr", "inpaint"],
+  );
+  let wizardStepIndex = $derived(activeWizardSteps.indexOf(step));
   let progressPct = $derived(
     step === "welcome"
       ? 0
-      : ((wizardStepIndex + 1) / WIZARD_STEPS.length) * 100,
+      : Math.min(100, Math.round(((wizardStepIndex + 1) / activeWizardSteps.length) * 100)),
   );
 </script>
 
@@ -648,25 +864,28 @@
                         ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
                         : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 hover:border-zinc-300 dark:hover:border-zinc-700'}"
                     >
-                      <div class="flex items-center gap-2 mb-1">
-                        <Cpu
-                          size={14}
-                          class={detectionModel === model.id
-                            ? "text-blue-500"
-                            : "text-zinc-500"}
-                        />
-                        <span
-                          class="text-sm font-bold {detectionModel === model.id
-                            ? 'text-blue-600 dark:text-blue-400'
-                            : 'text-zinc-700 dark:text-zinc-300'}"
-                        >
-                          {model.label}
-                        </span>
+                      <div class="flex items-center justify-between mb-1">
+                        <div class="flex items-center gap-1.5">
+                          <Cpu
+                            size={14}
+                            class={detectionModel === model.id
+                              ? "text-blue-500"
+                              : "text-zinc-500"}
+                          />
+                          <span
+                            class="text-sm font-bold {detectionModel === model.id
+                              ? 'text-blue-600 dark:text-blue-400'
+                              : 'text-zinc-700 dark:text-zinc-300'}"
+                          >
+                            {model.label}
+                          </span>
+                        </div>
+                        <span class="text-[10px] font-mono text-zinc-400">{model.size}</span>
                       </div>
                       <p
-                        class="text-xs text-zinc-500 dark:text-zinc-400 font-mono truncate"
+                        class="text-xs text-zinc-500 dark:text-zinc-400 leading-snug"
                       >
-                        {model.id}
+                        {model.desc}
                       </p>
                     </button>
                   {/each}
@@ -674,49 +893,77 @@
 
                 <!-- Prefetch status -->
                 <div
-                  class="flex items-center gap-3 p-3.5 rounded-xl border transition-colors
+                  class="flex flex-col gap-2 p-3.5 rounded-xl border transition-colors
                     {detectionPrefetched
                     ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20'
                     : detectionError
-                      ? 'border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20'
-                      : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50'}"
+                      ? 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'
+                      : detectionPrefetching
+                        ? 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20'
+                        : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50'}"
                 >
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                      {#if detectionPrefetching}
+                        <LoaderCircle
+                          size={15}
+                          class="animate-spin text-blue-500 shrink-0"
+                        />
+                        <span class="text-xs font-semibold text-blue-700 dark:text-blue-300">
+                          Downloading detection model weights...
+                        </span>
+                      {:else if detectionPrefetched}
+                        <CircleCheck size={15} class="text-emerald-500 shrink-0" />
+                        <span
+                          class="text-xs text-emerald-700 dark:text-emerald-400 font-medium"
+                        >
+                          Model cached and ready to use.
+                        </span>
+                      {:else if detectionError}
+                        <CircleAlert size={15} class="text-red-500 shrink-0" />
+                        <span
+                          class="text-xs text-red-700 dark:text-red-400 flex-1"
+                        >
+                          {detectionError}
+                        </span>
+                      {:else}
+                        <Download size={15} class="text-zinc-500 shrink-0" />
+                        <span class="text-xs text-zinc-600 dark:text-zinc-400">
+                          Model not yet cached in local storage.
+                        </span>
+                      {/if}
+                    </div>
+
+                    {#if !detectionPrefetched && !detectionPrefetching}
+                      <button
+                        type="button"
+                        onclick={prefetchDetection}
+                        class="px-2.5 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-sm transition-all cursor-pointer whitespace-nowrap shrink-0"
+                      >
+                        Download &amp; Cache
+                      </button>
+                    {:else if detectionError}
+                      <button
+                        type="button"
+                        onclick={prefetchDetection}
+                        class="px-2.5 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-sm transition-all cursor-pointer whitespace-nowrap shrink-0"
+                      >
+                        Retry
+                      </button>
+                    {/if}
+                  </div>
+
                   {#if detectionPrefetching}
-                    <LoaderCircle
-                      size={15}
-                      class="animate-spin text-zinc-500 dark:text-zinc-400 shrink-0"
-                    />
-                    <span class="text-xs text-zinc-600 dark:text-zinc-400">
-                      Caching model weights from Hugging Face...
-                    </span>
-                  {:else if detectionPrefetched}
-                    <CircleCheck size={15} class="text-emerald-500 shrink-0" />
-                    <span
-                      class="text-xs text-emerald-700 dark:text-emerald-400 font-medium"
-                    >
-                      Model cached and ready to use.
-                    </span>
-                  {:else if detectionError}
-                    <CircleAlert size={15} class="text-amber-500 shrink-0" />
-                    <span
-                      class="text-xs text-amber-700 dark:text-amber-400 flex-1"
-                    >
-                      {detectionError}
-                    </span>
-                    <button
-                      onclick={prefetchDetection}
-                      class="text-xs text-blue-500 hover:text-blue-400 shrink-0 cursor-pointer"
-                    >
-                      Retry
-                    </button>
-                  {:else}
-                    <LoaderCircle
-                      size={15}
-                      class="text-zinc-400 shrink-0 opacity-50"
-                    />
-                    <span class="text-xs text-zinc-500 dark:text-zinc-400">
-                      Waiting to start...
-                    </span>
+                    <div class="w-full bg-blue-200/50 dark:bg-blue-950 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        class="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
+                        style="width: {detectionProgress}%"
+                      ></div>
+                    </div>
+                    <div class="flex justify-between text-[10px] text-zinc-500 dark:text-zinc-400 font-mono">
+                      <span>{detectionProgressText}</span>
+                      <span>{detectionProgress}%</span>
+                    </div>
                   {/if}
                 </div>
 
@@ -729,12 +976,12 @@
                   </button>
                   <button
                     onclick={() => goTo("mode")}
-                    disabled={detectionPrefetching}
+                    disabled={!detectionPrefetched || detectionPrefetching}
                     class="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-2.5 px-4 rounded-xl transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
                   >
                     {#if detectionPrefetching}
                       <LoaderCircle size={14} class="animate-spin" />
-                      Caching...
+                      Downloading...
                     {:else}
                       Continue
                       <ChevronRight size={14} />
@@ -1009,11 +1256,11 @@
                     Back
                   </button>
                   <button
-                    onclick={finishSetup}
+                    onclick={() => goTo("ocr")}
                     disabled={!serverHost.trim() || !serverModel.trim()}
                     class="flex-1 bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20 disabled:opacity-50 disabled:cursor-not-allowed font-bold py-2.5 px-4 rounded-xl transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
                   >
-                    Complete Setup
+                    Continue
                     <ChevronRight size={14} />
                   </button>
                 </div>
@@ -1194,12 +1441,318 @@
                     Back
                   </button>
                   <button
-                    onclick={finishSetup}
+                    onclick={() => (isModelOnlyMode ? finishSetup() : goTo("ocr"))}
                     disabled={!llmDone}
                     class="flex-1 bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20 disabled:opacity-50 disabled:cursor-not-allowed font-bold py-2.5 px-4 rounded-xl transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
                   >
-                    Complete Setup
+                    {isModelOnlyMode ? "Complete Setup" : "Continue"}
                     <ChevronRight size={14} />
+                  </button>
+                </div>
+              </div>
+
+            <!-- OCR SELECTION -->
+            {:else if step === "ocr"}
+              <div class="p-8 space-y-5">
+                <div>
+                  <h2 class="text-lg font-bold">Text Recognition (OCR)</h2>
+                  <p class="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
+                    Select the on-device optical character recognition engine.
+                  </p>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                  <button
+                    onclick={() => (selectedOcrEngine = "paddle")}
+                    class="p-4 rounded-xl border-2 text-left cursor-pointer transition-all
+                      {selectedOcrEngine === 'paddle'
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                      : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 hover:border-zinc-300 dark:hover:border-zinc-700'}"
+                  >
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="text-sm font-bold {selectedOcrEngine === 'paddle' ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-700 dark:text-zinc-300'}">
+                        PaddleOCR
+                      </span>
+                      <span class="text-[10px] font-mono text-zinc-400">~80 MB</span>
+                    </div>
+                    <p class="text-xs text-zinc-500 dark:text-zinc-400 leading-snug">
+                      Fast multilingual engine (default). Supports Japanese, Chinese, Korean, English, and more.
+                    </p>
+                  </button>
+
+                  <button
+                    onclick={() => (selectedOcrEngine = "manga-ocr")}
+                    class="p-4 rounded-xl border-2 text-left cursor-pointer transition-all
+                      {selectedOcrEngine === 'manga-ocr'
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                      : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 hover:border-zinc-300 dark:hover:border-zinc-700'}"
+                  >
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="text-sm font-bold {selectedOcrEngine === 'manga-ocr' ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-700 dark:text-zinc-300'}">
+                        Manga-OCR
+                      </span>
+                      <span class="text-[10px] font-mono text-zinc-400">~460 MB</span>
+                    </div>
+                    <p class="text-xs text-zinc-500 dark:text-zinc-400 leading-snug">
+                      Specialized ViT + BERT seq2seq model for Japanese manga dialogue and vertical text.
+                    </p>
+                  </button>
+                </div>
+
+                <!-- OCR Download / Cache Status Card -->
+                <div
+                  class="flex flex-col gap-2 p-3.5 rounded-xl border transition-colors
+                    {ocrDownloaded
+                    ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20'
+                    : ocrError
+                      ? 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'
+                      : ocrDownloading
+                        ? 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20'
+                        : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50'}"
+                >
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                      {#if ocrDownloading}
+                        <LoaderCircle size={15} class="animate-spin text-blue-500 shrink-0" />
+                        <span class="text-xs font-semibold text-blue-700 dark:text-blue-300">
+                          Downloading {selectedOcrEngine === "manga-ocr" ? "Manga-OCR" : "PaddleOCR"}...
+                        </span>
+                      {:else if ocrDownloaded}
+                        <CircleCheck size={15} class="text-emerald-500 shrink-0" />
+                        <span class="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                          {selectedOcrEngine === "manga-ocr" ? "Manga-OCR" : "PaddleOCR"} cached and ready to use.
+                        </span>
+                      {:else if ocrError}
+                        <CircleAlert size={15} class="text-red-500 shrink-0" />
+                        <span class="text-xs text-red-700 dark:text-red-400 flex-1">
+                          {ocrError}
+                        </span>
+                      {:else}
+                        <Download size={15} class="text-zinc-500 shrink-0" />
+                        <span class="text-xs text-zinc-600 dark:text-zinc-400">
+                          Model weights not yet cached in local storage.
+                        </span>
+                      {/if}
+                    </div>
+
+                    {#if !ocrDownloaded && !ocrDownloading}
+                      <button
+                        type="button"
+                        onclick={startOcrDownload}
+                        class="px-2.5 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-sm transition-all cursor-pointer whitespace-nowrap shrink-0"
+                      >
+                        Download &amp; Cache
+                      </button>
+                    {:else if ocrError}
+                      <button
+                        type="button"
+                        onclick={startOcrDownload}
+                        class="px-2.5 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-sm transition-all cursor-pointer whitespace-nowrap shrink-0"
+                      >
+                        Retry
+                      </button>
+                    {/if}
+                  </div>
+
+                  {#if ocrDownloading}
+                    <div class="w-full bg-blue-200/50 dark:bg-blue-950 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        class="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
+                        style="width: {ocrProgress}%"
+                      ></div>
+                    </div>
+                    <div class="flex justify-between text-[10px] text-zinc-500 dark:text-zinc-400 font-mono">
+                      <span>{ocrProgressText}</span>
+                      <span>{ocrProgress}%</span>
+                    </div>
+                  {/if}
+                </div>
+
+                <div class="flex gap-3 pt-2">
+                  <button
+                    onclick={() => (step = selectedMode === "api" ? "api" : "llm")}
+                    class="flex-1 border border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600 text-zinc-600 dark:text-zinc-400 font-semibold py-2.5 px-4 rounded-xl transition-all text-sm cursor-pointer"
+                  >
+                    Back
+                  </button>
+                  <button
+                    onclick={() => goTo("inpaint")}
+                    disabled={!ocrDownloaded || ocrDownloading}
+                    class="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white shadow-md shadow-blue-600/20 font-bold py-2.5 px-4 rounded-xl transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    {#if ocrDownloading}
+                      <LoaderCircle size={14} class="animate-spin" />
+                      Downloading...
+                    {:else}
+                      Continue
+                      <ChevronRight size={14} />
+                    {/if}
+                  </button>
+                </div>
+              </div>
+
+            <!-- INPAINTING SELECTION -->
+            {:else if step === "inpaint"}
+              <div class="p-8 space-y-5">
+                <div>
+                  <h2 class="text-lg font-bold">Inpainting &amp; Redraw</h2>
+                  <p class="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
+                    Configure how original text is cleaned before rendering translated text.
+                  </p>
+                </div>
+
+                <div class="space-y-3">
+                  <!-- Default Fast Ladder option -->
+                  <button
+                    type="button"
+                    class="w-full text-left p-4 rounded-xl border-2 transition-all cursor-pointer
+                      {!enableLamaInpaint
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                      : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 hover:border-zinc-300 dark:hover:border-zinc-700'}"
+                    onclick={() => (enableLamaInpaint = false)}
+                  >
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="text-sm font-bold {!enableLamaInpaint ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-700 dark:text-zinc-300'}">
+                        Auto Engine Ladder (Recommended)
+                      </span>
+                      <span class="text-[10px] font-mono text-zinc-400">0 MB extra</span>
+                    </div>
+                    <p class="text-xs text-zinc-500 dark:text-zinc-400 leading-snug">
+                      Uses pure mathematical planar fill, bilateral denoise, and Telea fast-marching. Instant, zero extra memory, perfectly cleans flat and JPEG paper.
+                    </p>
+                  </button>
+
+                  <!-- Optional LaMa Deep Learning model -->
+                  <button
+                    type="button"
+                    class="w-full text-left p-4 rounded-xl border-2 transition-all cursor-pointer
+                      {enableLamaInpaint
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                      : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 hover:border-zinc-300 dark:hover:border-zinc-700'}"
+                    onclick={() => (enableLamaInpaint = true)}
+                  >
+                    <div class="flex items-center justify-between mb-1">
+                      <div class="flex items-center gap-1.5">
+                        <span class="text-sm font-bold {enableLamaInpaint ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-700 dark:text-zinc-300'}">
+                          Enable LaMa Redraw Model
+                        </span>
+                        <span class="text-[9px] font-semibold px-1.5 py-0.2 rounded bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                          Deep Learning
+                        </span>
+                      </div>
+                      <span class="text-[10px] font-mono text-zinc-400">~207 MB</span>
+                    </div>
+                    <p class="text-xs text-zinc-500 dark:text-zinc-400 leading-snug">
+                      Finetuned neural inpainter that reconstructs screentone, halftone, and art textures behind text.
+                    </p>
+                    {#if enableLamaInpaint}
+                      <div class="mt-2.5 p-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-amber-800 dark:text-amber-300 text-xs leading-snug">
+                        <strong>Drawbacks &amp; Trade-offs:</strong>
+                        <ul class="list-disc list-inside mt-1 space-y-0.5 text-[11px]">
+                          <li>Requires downloading ~207 MB weights on first clean.</li>
+                          <li>Higher memory footprint (~500 MB RAM/VRAM).</li>
+                          <li>Inference takes ~1-2 seconds per complex region.</li>
+                        </ul>
+                      </div>
+                    {/if}
+                  </button>
+                </div>
+
+                <!-- Inpaint / LaMa Cache & Download Status Card -->
+                {#if enableLamaInpaint}
+                  <div
+                    class="flex flex-col gap-2 p-3.5 rounded-xl border transition-colors
+                      {lamaDownloaded
+                      ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20'
+                      : lamaError
+                        ? 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'
+                        : lamaDownloading
+                          ? 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20'
+                          : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50'}"
+                  >
+                    <div class="flex items-center justify-between">
+                      <div class="flex items-center gap-2">
+                        {#if lamaDownloading}
+                          <LoaderCircle size={15} class="animate-spin text-blue-500 shrink-0" />
+                          <span class="text-xs font-semibold text-blue-700 dark:text-blue-300">
+                            Downloading LaMa weights (~207 MB)...
+                          </span>
+                        {:else if lamaDownloaded}
+                          <CircleCheck size={15} class="text-emerald-500 shrink-0" />
+                          <span class="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                            LaMa weights cached and ready to use.
+                          </span>
+                        {:else if lamaError}
+                          <CircleAlert size={15} class="text-red-500 shrink-0" />
+                          <span class="text-xs text-red-700 dark:text-red-400 flex-1">
+                            {lamaError}
+                          </span>
+                        {:else}
+                          <Download size={15} class="text-zinc-500 shrink-0" />
+                          <span class="text-xs text-zinc-600 dark:text-zinc-400">
+                            LaMa weights (~207 MB) not yet cached in local storage.
+                          </span>
+                        {/if}
+                      </div>
+
+                      {#if !lamaDownloaded && !lamaDownloading}
+                        <button
+                          type="button"
+                          onclick={startLamaDownload}
+                          class="px-2.5 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-sm transition-all cursor-pointer whitespace-nowrap shrink-0"
+                        >
+                          Download Now
+                        </button>
+                      {:else if lamaError}
+                        <button
+                          type="button"
+                          onclick={startLamaDownload}
+                          class="px-2.5 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-sm transition-all cursor-pointer whitespace-nowrap shrink-0"
+                        >
+                          Retry
+                        </button>
+                      {/if}
+                    </div>
+
+                    {#if lamaDownloading}
+                      <div class="w-full bg-blue-200/50 dark:bg-blue-950 rounded-full h-1.5 overflow-hidden">
+                        <div
+                          class="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
+                          style="width: {lamaProgress}%"
+                        ></div>
+                      </div>
+                      <div class="flex justify-between text-[10px] text-zinc-500 dark:text-zinc-400 font-mono">
+                        <span>{lamaProgressText}</span>
+                        <span>{lamaProgress}%</span>
+                      </div>
+                    {/if}
+                  </div>
+                {:else}
+                  <div class="flex items-center gap-2 p-3 bg-zinc-100 dark:bg-zinc-800/60 rounded-xl text-xs text-zinc-500 dark:text-zinc-400">
+                    <Check size={14} class="text-emerald-500 shrink-0" />
+                    <span>Built-in mathematical ladder active. Zero extra model downloads required.</span>
+                  </div>
+                {/if}
+
+                <div class="flex gap-3 pt-2">
+                  <button
+                    onclick={() => (step = "ocr")}
+                    class="flex-1 border border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600 text-zinc-600 dark:text-zinc-400 font-semibold py-2.5 px-4 rounded-xl transition-all text-sm cursor-pointer"
+                  >
+                    Back
+                  </button>
+                  <button
+                    onclick={finishSetup}
+                    disabled={enableLamaInpaint && (!lamaDownloaded || lamaDownloading)}
+                    class="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white shadow-md shadow-blue-600/20 font-bold py-2.5 px-4 rounded-xl transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    {#if lamaDownloading}
+                      <LoaderCircle size={14} class="animate-spin" />
+                      Downloading...
+                    {:else}
+                      Complete Setup
+                      <ChevronRight size={14} />
+                    {/if}
                   </button>
                 </div>
               </div>

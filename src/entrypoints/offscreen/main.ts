@@ -10,6 +10,7 @@ import { deleteModelAllInfoInCache } from "@mlc-ai/web-llm";
 import { makeSiteRuleLocal, translateLocal } from "@/lib/webllm";
 import { inpaintImageTelea } from "@/lib/inpaint/telea";
 import { inpaintImageAuto } from "@/lib/inpaint/ladder";
+import { getCachedSegmentation } from "@/lib/detections/segmentation";
 
 async function detectBackend(): Promise<"webgpu" | "wasm"> {
   try {
@@ -59,6 +60,7 @@ browser.runtime.onMessage.addListener((msg, _, sendResponse) => {
       geminiKey,
       geminiModel,
       ocrMinConfidence,
+      ocrEngine,
       llmModel,
       llmTemperature,
       serverHost,
@@ -77,7 +79,17 @@ browser.runtime.onMessage.addListener((msg, _, sendResponse) => {
 
     if (currentMode === "webgpu") {
       const tOcr = performance.now();
-      textRecognise(src, bboxes, sourceLang, ocrMinConfidence, undefined, undefined, undefined, gateOptions)
+      textRecognise(
+        src,
+        bboxes,
+        sourceLang,
+        ocrMinConfidence,
+        undefined,
+        undefined,
+        undefined,
+        gateOptions,
+        ocrEngine,
+      )
         .then(async (ocrOut) => {
           const ocrResults = ocrOut.results;
           const ocr = performance.now() - tOcr;
@@ -106,7 +118,17 @@ browser.runtime.onMessage.addListener((msg, _, sendResponse) => {
         })
         .catch((err) => sendResponse({ error: err.message }));
     } else if (currentMode === "api") {
-      textRecognise(src, bboxes, sourceLang, ocrMinConfidence, undefined, undefined, undefined, gateOptions)
+      textRecognise(
+        src,
+        bboxes,
+        sourceLang,
+        ocrMinConfidence,
+        undefined,
+        undefined,
+        undefined,
+        gateOptions,
+        ocrEngine,
+      )
         .then((ocrOut) => {
           const ocrResults = ocrOut.results;
           translateWithServer(
@@ -178,13 +200,14 @@ browser.runtime.onMessage.addListener((msg, _, sendResponse) => {
   }
 
   if (msg.type === "OFFSCREEN_INPAINT_IMAGE") {
-    const { src, bboxes, radius, method } = msg.data;
+    const { src, bboxes, radius, method, useLama } = msg.data;
+    const segmentation = getCachedSegmentation(src);
 
-    // "auto": per-region engine ladder (fill -> denoise -> Telea, decline-gated).
+    // "auto": per-region engine ladder (fill -> denoise -> LaMa -> Telea, decline-gated).
     // Legacy methods keep the full-frame Telea response shape (a plain data URL).
     const work: Promise<unknown> =
       method === "auto"
-        ? inpaintImageAuto(src, bboxes)
+        ? inpaintImageAuto(src, bboxes, { useLama, segmentation })
         : inpaintImageTelea(src, bboxes, radius ?? 3);
 
     work.then(sendResponse).catch((err) => sendResponse({ error: err.message }));

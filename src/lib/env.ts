@@ -5,16 +5,34 @@ export const env = {
   githubRepo: import.meta.env.WXT_GITHUB_REPO || "",
   telemetryUrl: import.meta.env.WXT_TELEMETRY_URL || "",
   telemetryPublicKey: import.meta.env.WXT_TELEMETRY_PUBLIC_KEY || "",
-  detectionModelRepo:
-    import.meta.env.WXT_DETECTION_MODEL_REPO || "Kiuyha/Manga-Bubble-YOLO",
-  ocrModelRepo: import.meta.env.WXT_OCR_MODEL_REPO || "monkt/paddleocr-onnx",
-  // Script-ID gate model (Apache-2.0). Env override reserved for a future
-  // re-host; pins recorded at adoption (osd_lstm.onnx
-  // b18e0c1479d9eb67394993098f7e1079c9a93ef6f7b0416ee333fccb865c6e72,
-  // osd_labels.json a1888156b005065039c356e13a7bbef1ec454b45bf6aaf18c11f4a59b1ee35c5).
+
+  // Detection models
+  yoloDetectionModelRepo:
+    import.meta.env.WXT_YOLO_DETECTION_MODEL_REPO || "Kiuyha/Manga-Bubble-YOLO",
+  rtdetrModelRepo:
+    import.meta.env.WXT_RTDETR_MODEL_REPO ||
+    "ogkalu/comic-text-and-bubble-detector",
+  comicTextDetectorUrl:
+    import.meta.env.WXT_COMIC_TEXT_DETECTOR_URL ||
+    "https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.3/comictextdetector.pt.onnx",
+
+  // OCR models
+  paddleOCRModelRepo:
+    import.meta.env.WXT_PADDLE_OCR_MODEL_REPO || "monkt/paddleocr-onnx",
+  mangaOCRModelRepo:
+    import.meta.env.WXT_MANGA_OCR_MODEL_REPO || "mayocream/manga-ocr-onnx",
+
+  // Inpaint models
+  lamaInpaintModelRepo:
+    import.meta.env.WXT_LAMA_INPAINT_MODEL_REPO || "mayocream/lama-manga-onnx",
+
+  // Script gate model (Apache-2.0)
   gateModelRepo:
     import.meta.env.WXT_GATE_MODEL_REPO || "ogkalu/image-script-identification",
-  privacyUrl: import.meta.env.WXT_PRIVACY_URL || "https://raw.githubusercontent.com/mrdhnto/libre-manga-translator/refs/heads/main/privacy.md",
+
+  privacyUrl:
+    import.meta.env.WXT_PRIVACY_URL ||
+    "https://raw.githubusercontent.com/mrdhnto/libre-manga-translator/refs/heads/main/privacy.md",
 };
 
 export const hasGithubRepo = () => !!env.githubRepo;

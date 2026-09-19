@@ -301,6 +301,9 @@ export default defineContentScript({
                       ocrMinConfidence: await storage.getItem<number>(
                         "sync:ocr-min-confidence",
                       ),
+                      ocrEngine:
+                        (await storage.getItem<string>("sync:ocr-engine")) ??
+                        DefaultConfig.ocrEngine,
                       llmModel: await storage.getItem<string>("sync:llm-model"),
                       llmTemperature: await storage.getItem<number>(
                         "sync:llm-temperature",
@@ -459,6 +462,14 @@ export default defineContentScript({
                     inpaintedSrcCache.set(src, cached);
                     inpaintMethod = res.method;
 
+                    if (res.regions) {
+                      res.regions.forEach((r, idx) => {
+                        if (r.method === "declined" && paintable[idx]) {
+                          paintable[idx].inpaintDeclined = true;
+                        }
+                      });
+                    }
+
                     const inpaintStats = res.regions
                       ? {
                           fill: res.regions.filter(
@@ -466,6 +477,9 @@ export default defineContentScript({
                           ).length,
                           denoise: res.regions.filter(
                             (r) => r.method === "denoise",
+                          ).length,
+                          lama: res.regions.filter(
+                            (r) => r.method === "lama",
                           ).length,
                           telea: res.regions.filter(
                             (r) => r.method === "telea",

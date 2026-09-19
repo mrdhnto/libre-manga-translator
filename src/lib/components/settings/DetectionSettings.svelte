@@ -13,6 +13,10 @@
     detectionAutoUpdate: boolean;
     isFetchingDetection?: boolean;
   } = $props();
+
+  const activeModel = $derived(
+    DefaultConfig.detectionModels.find((m) => m.id === detectionModel),
+  );
 </script>
 
 <div>
@@ -40,9 +44,19 @@
         class="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2.5 text-sm outline-none cursor-pointer shadow-sm"
       >
         {#each DefaultConfig.detectionModels as model}
-          <option value={model.id}>{model.label}</option>
+          <option value={model.id}>{model.label} ({model.size})</option>
         {/each}
       </select>
+      {#if activeModel}
+        <div class="flex items-center justify-between text-[11px] text-zinc-500 pt-0.5">
+          <div>
+            <span class="font-mono bg-zinc-200 dark:bg-zinc-800 px-1.5 py-0.5 rounded text-[10px]">
+              {activeModel.size}
+            </span>
+            {activeModel.desc}
+          </div>
+        </div>
+      {/if}
     </div>
 
     <div class="grid grid-cols-[1fr_auto] gap-6 items-center pt-1">

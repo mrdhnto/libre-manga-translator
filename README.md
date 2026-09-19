@@ -72,7 +72,7 @@ graph TD
     Img[Manga Page] --> Detect
 
     subgraph offscreen ["Offscreen Document (isolated inference thread)"]
-        Detect["YOLO Detection
+        Detect["Detection (YOLO / RT-DETR / ComicText)
 ONNX Runtime Web"]
         Detect --> Boxes["Bounding Boxes
 (merged, speckle dropped)"]
@@ -89,7 +89,7 @@ OCR + Translation in one call"]
     Gemini --> Text
 
     Mode -->|WebGPU| OCR["Script gate: pixels + text, then
-PaddleOCR ONNX on-device (CPU/WASM)"]
+OCR engine on-device (Paddle / Manga-OCR, CPU/WASM)"]
     Mode -->|API| OCR
 
     OCR --> Raw[Raw Text per Bubble]
@@ -107,19 +107,19 @@ Ollama / LM Studio / OpenAI-compatible"]
     Server --> Text
 
     Text --> Inpaint["Auto inpaint ladder: fitted mask, lightest
-engine that passes quality (skipped boxes untouched)"]
+engine that passes quality (+ optional LaMa, declined boxes untouched)"]
     Inpaint --> Paint["Repaint with Translated Text
 custom font + auto-fit sizing"]
     Paint --> Result[Translated Page]
 ```
 
-Detection never sends an image anywhere. The YOLO model runs in a dedicated offscreen document, keeping inference off the main page thread and away from the popup UI.
+Detection never sends an image anywhere. The detection models run in a dedicated offscreen document, keeping inference off the main page thread and away from the popup UI. See [docs/technical.md](docs/technical.md) for the full model list.
 
 ---
 
 ## Features
 
-**Full local pipeline.** YOLO26-Nano runs via ONNX Runtime Web. PaddleOCR extracts text on-device. Qwen3 4B or 8B translates via WebLLM with WebGPU acceleration. After the first model download, the whole pipeline works offline.
+**Full local pipeline.** YOLO26-Nano runs via ONNX Runtime Web by default (Small, RT-DETR bubble detector, and Comic Text Detector with pixel-mask seeding are selectable in Settings › Detection). PaddleOCR extracts text on-device. Qwen3 4B or 8B translates via WebLLM with WebGPU acceleration. After the first model download, the whole pipeline works offline.
 
 **Cloud option.** Point LMT at any Gemini model you have access to. The annotated image goes directly from your browser to the Gemini API. Good for when you want higher accuracy or your machine does not have a GPU.
 
@@ -134,7 +134,7 @@ Detection never sends an image anywhere. The YOLO model runs in a dedicated offs
 **Opt-in improvement data.** When you correct a bounding box, LMT can send the adjusted coordinates and the original image url / site url to help retrain the detection model. This is opt-in during onboarding and can be turned off at any time.
 
 **API Mode for self-hosted backends.** Connect to your own LLM server running locally or on your network. Supports:
-- **OpenAI-compatible APIs** (Ollama, OpenRouter, DeepSeek, and others)
+- **OpenAI-compatible APIs** (Ollama, OpenRouter, Venice AI, and others)
 - **LM Studio experimental endpoint** with native prompt format and structured output
 - Any endpoint at `/v1/chat/completions`
 
@@ -151,6 +151,12 @@ Detection never sends an image anywhere. The YOLO model runs in a dedicated offs
 **Auto inpainting (engine ladder).** The default clean path fits a text-shaped mask per region and uses the lightest engine that does the job: a planar fill that samples the paper around the text on flat pages, a bilateral denoise fill on grainy/JPEG scans, and Telea fast-marching only where the region needs a real rebuild. Every result is scored by one quality check - if it looks worse than the paper around it, the region climbs to the next engine, and if nothing passes it is left exactly as it was and flagged for you. Untouched pixels stay identical; no ghost rectangles, no flat patches, no halos. Choose **Auto** (recommended), **Telea** (legacy full-region fast-marching), or **Fast** (edge-blend) under **Appearance › Inpainting**.
 
 **Language gate.** Before translating, LMT checks each detected region really holds the source language - a lightweight on-device script-identification model (a ~3.7 MB download) over the actual pixels, confirmed against the recognized text. Sound effects, lettering over artwork, and a localiser's Latin text on a Japanese page are held back instead of machine-translated into garbage: they keep their original text and are marked with a dashed outline and a **Translate anyway** button, so a wrong call is always one click from being undone. Strict when you pick a source language (especially Japanese/Chinese/Korean), gentle under **Auto-Detect** where it follows the page's majority script. Toggle in **Settings › OCR**.
+
+**OCR engine choice.** Pick the text reader in **Settings › OCR**: PaddleOCR (~80 MB, fast multilingual default) or Manga-OCR (~460 MB, Japanese manga specialist that handles vertical text and stylized lettering). Held-back regions keep their recognized text so you can still view and edit it.
+
+**LaMa redraw (opt-in).** Under **Appearance › Inpainting**, enable the LaMa redraw rung for complex screentone, halftone, and art behind text. One-time ~207 MB download, ~500 MB RAM/VRAM, ~1–2s per complex region — worth it where the pure-JS rungs would leave flat patches or smudges.
+
+**Model storage.** **Settings › Model Storage** lists every downloaded weight with its size, plus per-model delete and full cache clear. Translation results are keyed per page + image, so re-opening a page reuses prior work.
 
 **Universal cross-origin & anti-hotlink support.** Automatic fallback using background declarativeNetRequest to bypass CDN referer checks and Cloudflare protection on third-party manga hosting domains (e.g. `i.sstatic.net`, `imgsrv5.com`, `scans.lastation.us`). Combined with magic-byte MIME sniffing for robust image decoding across all formats (JPEG, PNG, WebP, GIF, AVIF).
 
@@ -254,7 +260,7 @@ Open the extension popup and go through the onboarding flow, or go to **Settings
 
 Any service exposing `/v1/chat/completions` works:
 - **OpenRouter:** `https://openrouter.ai/api/v1`
-- **DeepSeek:** `https://api.deepseek.com/v1`
+- **Venice AI:** `https://api.venice.ai/api/v1`
 - **Together AI:** `https://api.together.xyz/v1`
 
 ---
@@ -318,86 +324,27 @@ That is it. The next build picks the file up automatically - no registry to edit
 
 ---
 
-## Detection Model
+## Detection Models
 
-The bubble detector is a custom YOLO26 model trained on 5,595 manga pages from Manga109-s and MangaDex. It runs locally in the offscreen document via ONNX Runtime Web.
+Four selectable detectors, all on-device: YOLO26-Nano (default, 2.4 MB, bubbles fast), YOLO26-Small (9.5 MB, denser bubbles), Comic Bubble Detector RT-DETR (11.1 MB, bubbles + free text), and Comic Text Detector with pixel-mask seeding (94.7 MB, denser bubbles + free text). Switch in **Settings › Detection** (Min Confidence 0.5, Auto-Update on).
 
-| Model | Precision | Recall | mAP@50 | mAP@50-95 | Params |
-|---|---|---|---|---|---|
-| YOLO26-Nano (default) | 0.929 | 0.863 | 0.947 | 0.765 | 2.4M |
-| YOLO26-Small | 0.937 | 0.893 | 0.961 | 0.802 | 9.5M |
-
-Nano is fast enough for interactive use and handles most manga without issues. Small is more accurate on pages with dense or small text but takes roughly 2.5x longer to run.
-
-**Weights:** [Hugging Face - Kiuyha/Manga-Bubble-YOLO](https://huggingface.co/Kiuyha/Manga-Bubble-YOLO)
-
-### Detection settings
-
-| Setting | Default | Notes |
-|---|---|---|
-| Model | YOLO26-Nano | Switch to Small for dense or small-text pages |
-| Min Confidence | 0.5 | Lower catches more bubbles but increases false positives |
-| Auto-Update | On | Downloads new weights automatically when available |
+Full table with accuracy metrics, licenses, and weight links: [docs/technical.md](docs/technical.md).
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Extension framework | [WXT](https://wxt.dev) |
-| UI | [Svelte 5](https://svelte.dev) with runes |
-| Language | TypeScript |
-| Styling | Tailwind CSS |
-| Bubble detection | YOLO26 ONNX via ONNX Runtime Web |
-| Script gate | OSD script-identification LSTM (3.7 MB, ONNX Runtime Web) + Unicode-block text verification |
-| On-device OCR | PaddleOCR ONNX |
-| Inpainting | Pure-JS engine ladder (planar fill / bilateral denoise / Telea fast-marching) |
-| Local translation | [WebLLM](https://webllm.mlc.ai/) (Qwen3 4B / 8B) |
-| Cloud translation | Gemini API via REST |
-| API Mode backends | Ollama, LM Studio, OpenAI-compatible |
-| Storage | WXT storage (wraps chrome.storage) |
-| Build | Bun |
-| Telemetry | Supabase / Rest API (opt-in bbox coordinates only) |
+WXT + Svelte 5 + TypeScript + Tailwind CSS. On-device detection (YOLO26 / RT-DETR / ComicTextDetector), OCR (PaddleOCR / Manga-OCR), and auto inpaint ladder (+ optional LaMa) via ONNX Runtime Web; WebLLM Qwen3, Gemini, or self-hosted LLM for translation. Bun for builds.
+
+Full layer table: [docs/technical.md](docs/technical.md).
 
 ---
 
 ## Project Structure
 
-```
-src/
-  assets/
-    app.css              # Global styles and @font-face declarations
-    fonts/               # Bundled fonts (Noto Sans, Bangers, Comic Neue)
+Standard WXT layout: `src/entrypoints/` (background, content, offscreen, popup, setup) + `src/lib/` (detections, OCR, gate, inpaint, gemini, server, adapters, components) + `scripts/` self-checks.
 
-  entrypoints/
-    background/          # Service worker: message router, context menu, model prefetch
-    content/             # Injected into the page: mounts overlay + sidebar, debug logging
-    content/debug.ts     # Ring-buffer debug logger (OCR/text/timing only, no images)
-    offscreen/           # Isolated document: YOLO, OCR, LLM inference, Telea inpainting
-    popup/               # Extension popup (Home, Context, Settings tabs)
-    setup/               # Onboarding flow shown on first install
-
-  lib/
-    adapters.ts          # Trusted core rules + URL-to-metadata matching
-    adapters/            # Community site adapters (auto-imported at build)
-    components/
-      Overlay.svelte     # Bubble editor and translation overlay
-      Sidebar.svelte     # On-page sliding config panel (floating cog)
-      settings/          # Shared settings components (Detection/Ocr/Backend/Typography/SiteRules/Debug/Inpaint)
-    configs.ts           # Defaults: models, languages, fonts, thresholds, inpaint method
-    detections/          # YOLO ONNX inference wrapper + region build (merge/size/tiers)
-    env.ts               # Single typed source for all WXT_* env vars
-    gemini/              # Gemini API client and prompt construction
-    gate/                # Script gate: charset math, CTC convention, OSD session, voting/decision
-    inpaint/             # Auto engine ladder: mask fit, ring stats, planar fill, denoise, Telea, decline metric
-    ocr/                 # PaddleOCR ONNX inference wrapper
-    ort.ts               # ONNX Runtime init + execution-provider resolution
-    prompts.ts           # Shared prompt builders for all backends
-    server/              # API Mode: schemas.ts + main.ts (Ollama/LM Studio)
-    utils.ts             # Canvas painting, text fitting, inpainting fallback, bbox math
-    webllm.ts            # WebLLM loader and translation interface
-```
+Full annotated tree: [docs/technical.md](docs/technical.md).
 
 ---
 
@@ -414,19 +361,20 @@ for day-to-day activity between releases.
 - *Auto inpainting engine ladder* - fitted text-shaped masks and the lightest engine that passes a quality check; removes the ghost-rectangle, flat-patch, and halo artifacts of the old single-mask Telea path.
 - *Language gate* - on-device script verification that stops sound effects, artwork lettering, and wrong-language text from being machine-translated into garbage; every hold-back is one-click overridable.
 - *Deterministic region build* - merged fragments, dropped speckle, reading-order stability after detection.
+- *Manga-OCR engine* - selectable Japanese specialist (~460 MB) that fixes vertical text and stylized lettering PaddleOCR dropped or misread. Pick it in **Settings › OCR**.
+- *LaMa redraw rung (opt-in)* - deep-learning inpainting for screentone/halftone/art behind text (~207 MB one-time download). Toggle under **Appearance › Inpainting**.
+- *Extra detectors + model storage* - RT-DETR bubble detector and Comic Text Detector with pixel-mask seeding in **Settings › Detection**; **Settings › Model Storage** lists, deletes, and clears cached weights.
+- *Region tracking & OCR hardening* - page-index + image-hash cache keys, contrast/pad preprocessing, lower default Min Confidence (0.7), gate-held boxes keep their text for viewing/editing.
 
 ### 🔧 In Progress
 
-- *Model-backed inpaint rung* - an optional LaMa-class ONNX engine for screentone/art behind text, plus true per-pixel segmentation to seed the mask.
 - *Inpainting hardening* - Combine LaMa with golden-image verification of each inpaint rung and gate edge cases; screentone fixtures for the escalation path.
-- *More OCR model options* - evaluate alternatives to PaddleOCR for vertical text and non-Latin scripts, likely offered as a selectable detection setting rather than a hard swap.
+- *Chinese & Korean OCR (manhua / manhwa / webtoon)* - Japanese and vertical text are covered by Manga-OCR; CJK coverage beyond Japanese is the current OCR target.
 
 ### 🐛 Known Issues (actively investigating)
 
-- *Vertical text OCR* - PaddleOCR frequently misreads or drops
-  vertically-oriented text runs, common in traditional Japanese layout / manhwa / manhua.
-- *OCR reliability on JP / Manhwa / Manhua text* - text extraction
-  intermittently fails to produce results across these formats. Root cause still being isolated (may be OCR model limitation or preprocessing issue).
+- *OCR reliability on Manhua / Manhwa / Webtoon text* - text extraction
+  intermittently fails on Chinese/Korean formats. Root cause still being isolated (may be OCR model limitation or preprocessing issue).
 - *Gate false negatives* - heavily stylized or mixed-script lettering can still be read
   as the wrong script; the language gate marks every hold-back and offers **Translate
   anyway**, so it never silently drops a bubble.
@@ -488,11 +436,10 @@ LMT's environment.
 - Bilateral denoise for grainy scans
 
 ### Key Components
-- **Bubble Detection Model:** Custom YOLO26 trained on Manga109-s and MangaDex datasets by Ketut Shridhara - [Hugging Face](https://huggingface.co/Kiuyha/Manga-Bubble-YOLO)
-- **Script gate model:** `image-script-identification` OSD LSTM by ogkalu (Apache-2.0) - [Hugging Face](https://huggingface.co/ogkalu/image-script-identification)
-- **OCR:** PaddleOCR ONNX models - [Hugging Face](https://huggingface.co/monkt/paddleocr-onnx)
-- **Local Translation:** WebLLM (MLC-AI) with Qwen3 4B / 8B
-- **Framework:** WXT + Svelte 5 + TypeScript + Tailwind CSS
+
+Detection (YOLO26, RT-DETR, ComicTextDetector), script gate (OSD LSTM), OCR (PaddleOCR, Manga-OCR), inpainting (auto ladder + optional LaMa), local translation (WebLLM Qwen3 4B / 8B). Built on WXT + Svelte 5 + TypeScript + Tailwind CSS.
+
+Full per-model table with sizes, licenses, and weight links: [docs/technical.md](docs/technical.md).
 
 ---
 
@@ -506,6 +453,9 @@ This project is a derivative work. Copyright notices apply as follows:
 - **LMT additions** (API Mode, three-way routing, server schemas, prompt unification, runtime hardening, and all subsequent phases) - Copyright (c) 2025 Riski Mardhianto ([mrdhnto](https://github.com/Mrdhnto))
 
 Both portions are released under the MIT License. See [LICENSE](LICENSE) for full terms.
+
+**Optional Third-Party Model Weights:**
+- `comictextdetector.pt.onnx` is licensed under **GPL-3.0** by dmMaze and manga-image-translator. It is not bundled in the extension repository or release packages. When selected by the user in settings, the weights are downloaded directly on-demand to the user's local browser cache from the upstream public release. LMT's client wrapper is a clean-room independent TypeScript rewrite under the MIT License.
 
 ---
 

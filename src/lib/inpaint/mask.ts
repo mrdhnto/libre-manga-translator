@@ -118,6 +118,43 @@ export function buildInkSeed(
   return { data, w, h, ox, oy };
 }
 
+/**
+ * Seed mask derived from a true per-pixel segmentation model.
+ * Rescaled segmentation levels (0..255) sampled at native page coordinates
+ * and intersected with the region's masking bounds.
+ */
+export function buildSegmentationSeed(
+  segLevels: Uint8Array,
+  pageWidth: number,
+  pageHeight: number,
+  w: number,
+  h: number,
+  ox: number,
+  oy: number,
+  rect?: { x1: number; y1: number; x2: number; y2: number },
+): Mask {
+  const data = new Uint8Array(w * h);
+  const MASK_THRESHOLD = 76; // 0.3 * 255
+  const rx1 = rect ? Math.max(0, rect.x1) : 0;
+  const ry1 = rect ? Math.max(0, rect.y1) : 0;
+  const rx2 = rect ? Math.min(w - 1, rect.x2) : w - 1;
+  const ry2 = rect ? Math.min(h - 1, rect.y2) : h - 1;
+
+  for (let y = ry1; y <= ry2; y++) {
+    const py = oy + y;
+    if (py < 0 || py >= pageHeight) continue;
+    for (let x = rx1; x <= rx2; x++) {
+      const px = ox + x;
+      if (px < 0 || px >= pageWidth) continue;
+      if (segLevels[py * pageWidth + px] >= MASK_THRESHOLD) {
+        data[y * w + x] = 1;
+      }
+    }
+  }
+  dropSmallComponents(data, w, h, MIN_COMPONENT_PX);
+  return { data, w, h, ox, oy };
+}
+
 /** Square-kernel binary dilation, separable with a running-window count (O(n)). */
 export function dilate(m: Mask, k: number): Mask {
   if (k <= 0) return m;

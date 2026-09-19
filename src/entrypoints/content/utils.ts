@@ -279,6 +279,8 @@ export async function inpaintImage(
 }> {
   const method =
     (await storage.getItem<string>("sync:inpaint-method")) ?? "auto";
+  const useLama =
+    (await storage.getItem<boolean>("sync:inpaint-lama")) ?? false;
 
   if (method === "fast") {
     const url = await inpaintLocal(imageSrc, bboxes);
@@ -295,9 +297,9 @@ export async function inpaintImage(
     const response = await Promise.race([
       browser.runtime.sendMessage({
         type: "INPAINT_IMAGE",
-        data: { src: imageSrc, bboxes, radius, method },
+        data: { src: imageSrc, bboxes, radius, method, useLama },
       }),
-      timeout(30_000),
+      timeout(useLama ? 60_000 : 30_000),
     ]);
 
     if (response?.error) throw new Error(response.error);
