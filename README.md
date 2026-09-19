@@ -212,8 +212,8 @@ Open the extension popup and go through the onboarding flow, or go to **Settings
   1. Select API Mode in the Home tab
   2. Choose your schema (OpenAI or LM Studio)
   3. Set the Host URL (e.g. `http://127.0.0.1:11434/v1` for Ollama or `http://127.0.0.1:1234/api/v1` for LM Studio)
-4. Enter your model name (e.g. `qwen2.5:7b`)
-   5. Click **Test Connection** to verify
+  4. Enter your model name (e.g. `qwen3.5:4b`)
+  5. Click **Test Connection** to verify
 
 ---
 
@@ -237,16 +237,16 @@ Open the extension popup and go through the onboarding flow, or go to **Settings
 ### Recommended: Ollama
 
 1. **Install Ollama:** Download from [ollama.com](https://ollama.com)
-2. **Pull a model:** `ollama pull qwen2.5:7b`
+2. **Pull a model:** `ollama pull qwen3.5:4b`
 3. **Configure LMT:**
    - Host: `http://127.0.0.1:11434/v1`
    - Schema: OpenAI
-   - Model: `qwen2.5:7b`
+   - Model: `qwen3.5:4b`
 
 ### Alternative: LM Studio
 
 1. **Download LM Studio:** Install from [lmstudio.ai](https://lmstudio.ai)
-2. **Download a model:** Search for and download a text model like `qwen2.5-7b-instruct`
+2. **Download a model:** Search for and download a text model like `tiny-aya-global`
 3. **Start Local Server:**
    - Go to the **Local Server** tab
    - Select your model
