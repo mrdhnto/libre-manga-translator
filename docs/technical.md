@@ -31,7 +31,7 @@ Developer-facing details for Libre Manga Translator: models, settings, pipeline 
 | Script gate | OSD script-identification LSTM (~3.7 MB, ONNX Runtime Web) + Unicode-block text verification |
 | On-device OCR | PaddleOCR ONNX (`~80 MB`, multilingual default) or Manga-OCR ONNX (`~460 MB`, Japanese specialist) |
 | Inpainting | Auto engine ladder: pure-JS planar fill (rung 0) / bilateral denoise (rung 1) / optional LaMa redraw (rung 2, `~207 MB`) / Telea fast-marching (rung 3) |
-| Local translation | [WebLLM](https://webllm.mlc.ai/) (Qwen3 4B / 8B) |
+| Local translation | Chrome: [WebLLM](https://webllm.mlc.ai/) (Qwen3 4B / 8B MLC) · Firefox: [wllama](https://github.com/ngxson/wllama) (Qwen3.5-4B GGUF) |
 | Cloud translation | Gemini API via REST |
 | API Mode backends | Ollama, LM Studio, OpenAI-compatible |
 | Storage | WXT storage (wraps chrome.storage); model weights in browser cache (see below) |
@@ -50,9 +50,20 @@ detect (YOLO26 / RT-DETR / ComicTextDetector) → refine regions (merge/size)
 
 Mode determines the translate step:
 
-- **webgpu** → `textRecognise()` → `translateLocal()` (WebLLM Qwen3 in-browser)
+- **webgpu** → `textRecognise()` → local LLM (Chrome: `translateLocal()` via WebLLM Qwen3-MLC; Firefox: `translateWithWllama()` via wllama Qwen3.5-GGUF — see [Local LLM backends](#local-llm-backends))
 - **api** → `textRecognise()` → `translateWithServer()` (HTTP to external server)
 - **gemini** → `translateWithGemini()` (annotated image to Google, skips OCR)
+
+## Local LLM backends
+
+WebGPU mode runs fully on-device. The engine is per-browser (Firefox-only swap — Chrome keeps MLC weights, so existing Chrome users never re-download):
+
+| Build | Engine | Model | Weights | Backend code |
+|---|---|---|---|---|
+| Chrome | WebLLM (`@mlc-ai/web-llm`) | Qwen3-4B / 8B `q4f16_1-MLC` | 3.4 / 5.7 GB via WebLLM cache | `src/lib/webllm.ts` |
+| Firefox | wllama (`@wllama/wllama`, MIT) | Qwen3.5-4B `IQ4_XS` GGUF | ~2.3 GB (`unsloth/Qwen3.5-4B-GGUF`, env `WXT_GGUF_MODEL_REPO`) via shared CacheStorage | `src/lib/wllama.ts` |
+
+Selection: `llmModelDef()` / `visibleLlmModels()` in `src/lib/configs.ts` (stored `sync:llm-model` ids resolve with cross-engine fallback); offscreen routes in `translateLocalRouted` / `makeSiteRuleLocalRouted` (`src/entrypoints/offscreen/main.ts`). Both backends serve the same `TranslateResult` shape with the same `response_format` JSON-schema contract (`json_schema` on wllama, `json_object` fallback, then unconstrained + the shared cleanup parse); Qwen thinking mode is disabled via `chat_template_kwargs` when the template supports it. GGUF download/delete flows through the existing model-cache plumbing (`fetchAndCacheWithProgress`, `local:cached-llms`, Model Storage UI), so no new storage keys were needed.
 
 Shared prompts live in `src/lib/prompts.ts` (`buildTranslationPrompts`, `buildSiteRulePrompts`), used by both `webllm.ts` and `server/main.ts`. The offscreen document (`src/entrypoints/offscreen/main.ts`) switches on `currentMode`. Background (`src/entrypoints/background/index.ts`) forwards messages and handles `TEST_BACKEND`, `PREFETCH_MODEL`, `PROXY_IMAGE`, `SEND_TELEMETRY`.
 
@@ -210,6 +221,8 @@ bun run zip:firefox     # package Firefox extension zip
 
 Manual test matrix: WebGPU right-click translate; Gemini with API key; API Mode against Ollama (`http://127.0.0.1:11434/v1`) with **Test Connection**; Auto inpaint on flat-paper balloon (no ghost rectangle); Japanese page with a Latin SFX box → dashed amber + **Translate anyway**.
 
+Chunk budget (Firefox AMO allows max ~2 MB per `.js`): `wxt.config.ts` forces terser and isolates `onnxruntime-web` into an `ort-*` chunk via the `lmt-vendor-chunk-guard` plugin (a static `manualChunks` would break WXT's single-file background/content builds, so the plugin drops it when `inlineDynamicImports` is set). `@mlc-ai/web-llm` is dynamic-only at its three use sites (`lib/webllm.ts`, setup LLM download, offscreen cache-delete) so it ships as a lazy async chunk. Each LLM-vendor import additionally sits behind a build-time `import.meta.env.FIREFOX` branch: dead-branch elimination ships web-llm **only** in Chrome builds and wllama (+8.4 MB `.wasm` asset, not `.js`) **only** in Firefox builds. Result: `firefox-mv2` has no `webllm-*` chunk and every `.js` is ≤ ~1 MB. wllama's emitted JS is CSP-clean (no `eval`/`new Function`, verified by scanning the chunk).
+
 ## Model Licenses
 
 LMT code is MIT. Bundled-model weights follow their upstream licenses
@@ -225,6 +238,8 @@ LMT code is MIT. Bundled-model weights follow their upstream licenses
 - **Inpainting:**
   - Auto engine ladder: pure-JS planar fill (rung 0), bilateral denoise (rung 1), and Telea fast-marching (rung 3)
   - LaMa redraw model (rung 2, opt-in): `lama-manga.onnx` by mayocream / dreMaz / advimman (MIT) - [Hugging Face](https://huggingface.co/mayocream/lama-manga-onnx)
-- **Local Translation:** WebLLM (MLC-AI) with Qwen3 4B / 8B
+- **Local Translation:**
+  - WebLLM (MLC-AI) with Qwen3 4B / 8B (Chrome builds)
+  - wllama (llama.cpp WASM, MIT) with Qwen3.5-4B GGUF - [Hugging Face](https://huggingface.co/unsloth/Qwen3.5-4B-GGUF) (Apache-2.0 weights, Firefox builds; runtime `wllama.wasm` bundled, never CDN)
 
 `comictextdetector.pt.onnx` is **GPL-3.0** (zyddnys / manga-image-translator). It is not bundled in the repository or release packages. When the user selects it in settings, the weights download on-demand directly to the user's local browser cache from the upstream public release. LMT's client wrapper is an independent TypeScript implementation under MIT.

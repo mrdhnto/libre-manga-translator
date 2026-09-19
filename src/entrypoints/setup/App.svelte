@@ -15,8 +15,24 @@
     CircleAlert,
     CircleCheck,
   } from "lucide-svelte";
-  import { DefaultConfig } from "@/lib/configs";
-  import { MLCEngine, deleteModelAllInfoInCache } from "@mlc-ai/web-llm";
+  import {
+    DefaultConfig,
+    defaultLlmModelId,
+    llmModelDef,
+    visibleLlmModels,
+  } from "@/lib/configs";
+  // Dynamic-only: @mlc-ai/web-llm is a multi-MB prebundled file. A static
+  // import would pull it into the setup page's initial chunk and break the
+  // 2MB-per-.js Firefox AMO limit. It loads on demand in startLlmDownload /
+  // cleanLlmModel instead (own async chunk, fetched on user click). On
+  // Firefox builds the branch is statically false, so the bundler drops the
+  // 6MB chunk entirely — Firefox uses wllama (GGUF).
+  const loadWebLlm = () =>
+    import.meta.env.FIREFOX
+      ? Promise.reject(
+          new Error("web-llm backend excluded from Firefox builds"),
+        )
+      : import("@mlc-ai/web-llm");
   import { untrack } from "svelte";
   import { env } from "@/lib/env";
   import { fetchAndCacheWithProgress, isArtifactCached } from "@/lib/utils";
@@ -77,8 +93,9 @@
   let lamaProgressText = $state("");
   let lamaError = $state<string | null>(null);
 
-  // LLM step
-  let selectedLlmModel = $state(DefaultConfig.llmModels[0].id);
+  // LLM step (per-browser list: GGUF/wllama on Firefox, MLC/web-llm elsewhere)
+  const browserLlmModels = visibleLlmModels();
+  let selectedLlmModel = $state(defaultLlmModelId());
   let llmDownloading = $state(false);
   let llmProgress = $state(0);
   let llmProgressText = $state("Preparing...");
@@ -94,8 +111,7 @@
     const params = new URLSearchParams(window.location.search);
     const modelParam = params.get("model");
     if (modelParam) {
-      const found = DefaultConfig.llmModels.find((m) => m.id === modelParam);
-      if (found) selectedLlmModel = found.id;
+      selectedLlmModel = llmModelDef(modelParam).id;
       isModelOnlyMode = true;
       step = "llm";
       if (params.get("clean") === "1") {
@@ -110,7 +126,14 @@
     llmCleanError = null;
     llmDone = false;
     try {
-      await deleteModelAllInfoInCache(selectedLlmModel);
+      const def = llmModelDef(selectedLlmModel);
+      if (def.engine === "wllama" && import.meta.env.FIREFOX) {
+        const { deleteWllamaCache } = await import("@/lib/wllama");
+        await deleteWllamaCache(def);
+      } else {
+        const { deleteModelAllInfoInCache } = await loadWebLlm();
+        await deleteModelAllInfoInCache(selectedLlmModel);
+      }
       const items = await storage.getItems(["local:cached-llms"]);
       const cached = (items[0].value as string[]) || [];
       await storage.setItem(
@@ -156,6 +179,15 @@
           startLamaDownload();
         }
       });
+    }
+  });
+
+  $effect(() => {
+    // No !llmDone guard: switching models must re-probe (a stale true would
+    // pin "downloaded"). Same-value $state assignment doesn't retrigger, so
+    // a settled check terminates the effect.
+    if (step === "llm" && selectedLlmModel && !llmDownloading) {
+      checkLlmStatus();
     }
   });
 
@@ -432,6 +464,42 @@
     return cached;
   }
 
+  // LLM cache check (wllama GGUF only — web-llm manages its own opaque
+  // cache, surfaced via cachedLlms). Uses the stored content-length header
+  // instead of reading the body: a multi-GB blob() can stall the check.
+  // Also reconciles local:cached-llms so badges agree after a refresh.
+  async function checkLlmStatus(): Promise<boolean> {
+    llmError = null;
+    const def = llmModelDef(selectedLlmModel);
+    if (def.engine !== "wllama" || !def.repo || !def.file) return false;
+    try {
+      const url = `https://huggingface.co/${def.repo}/resolve/main/${def.file}`;
+      const cache = await caches.open(def.repo);
+      const res = await cache.match(url);
+      const size = res?.ok
+        ? parseInt(res.headers.get("content-length") ?? "0", 10)
+        : 0;
+      const cached = size > 1024;
+      // Assign both ways (like the OCR/LaMa checkers): a stale true would
+      // otherwise pin the step to "downloaded" after switching models.
+      llmDone = cached;
+      if (cached) {
+        llmProgress = 100;
+        llmProgressText = `${(size / 1024 / 1024).toFixed(1)} MB cached`;
+        const items = await storage.getItems(["local:cached-llms"]);
+        const list = (items[0].value as string[]) || [];
+        if (!list.includes(def.id)) {
+          await storage.setItems([
+            { key: "local:cached-llms", value: [...list, def.id] },
+          ]);
+        }
+      }
+      return cached;
+    } catch {
+      return false;
+    }
+  }
+
   async function startLamaDownload() {
     if (!enableLamaInpaint) return;
     lamaDownloading = true;
@@ -464,13 +532,31 @@
     llmProgress = 0;
     llmProgressText = "Initializing...";
     try {
-      const engine = new MLCEngine({
-        initProgressCallback: (p) => {
-          llmProgress = Math.round((p.progress ?? 0) * 100);
-          llmProgressText = p.text ?? "";
-        },
-      });
-      await engine.reload(selectedLlmModel);
+      const def = llmModelDef(selectedLlmModel);
+      if (def.engine === "wllama" && import.meta.env.FIREFOX) {
+        const { downloadWllamaModel } = await import("@/lib/wllama");
+        await downloadWllamaModel(
+          def,
+          (loaded, total) => {
+            llmProgress =
+              total > 0 ? Math.round((loaded / total) * 100) : 0;
+            llmProgressText = `${(loaded / 1024 / 1024).toFixed(1)} MB${total > 0 ? ` / ${(total / 1024 / 1024).toFixed(1)} MB` : ""}`;
+          },
+          (stage) => {
+            llmProgressText = stage;
+          },
+        );
+        llmProgress = 100;
+      } else {
+        const { MLCEngine } = await loadWebLlm();
+        const engine = new MLCEngine({
+          initProgressCallback: (p) => {
+            llmProgress = Math.round((p.progress ?? 0) * 100);
+            llmProgressText = p.text ?? "";
+          },
+        });
+        await engine.reload(selectedLlmModel);
+      }
       llmDone = true;
       const items = await storage.getItems(["local:cached-llms"]);
       const cached = (items[0].value as string[]) || [];
@@ -565,7 +651,7 @@
           </div>
 
           <div class="grid grid-cols-2 gap-3">
-            {#each DefaultConfig.llmModels as model}
+            {#each browserLlmModels as model}
               <button
                 onclick={() => (selectedLlmModel = model.id)}
                 disabled={llmDownloading}
@@ -587,7 +673,7 @@
                 <span
                   class="text-[10px] font-bold tracking-wide uppercase px-1.5 py-0.5 rounded-md bg-zinc-200 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400"
                 >
-                  {model.vram} VRAM
+                  {model.vram}{model.engine === "wllama" ? " download" : " VRAM"}
                 </span>
               </button>
             {/each}
@@ -1280,7 +1366,7 @@
                 </div>
 
                 <div class="grid grid-cols-2 gap-3">
-                  {#each DefaultConfig.llmModels as model}
+                  {#each browserLlmModels as model}
                     <button
                       onclick={() => (selectedLlmModel = model.id)}
                       disabled={llmDownloading}
@@ -1305,7 +1391,7 @@
                       <span
                         class="text-[10px] font-bold tracking-wide uppercase px-1.5 py-0.5 rounded-md bg-zinc-200 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400"
                       >
-                        {model.vram} VRAM
+                        {model.vram}{model.engine === "wllama" ? " download" : " VRAM"}
                       </span>
                     </button>
                   {/each}

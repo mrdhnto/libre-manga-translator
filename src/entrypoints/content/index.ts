@@ -3,7 +3,7 @@ import Sidebar from "@/lib/components/Sidebar.svelte";
 import { mount, unmount } from "svelte";
 import { ShadowRootContentScriptUi } from "#imports";
 import { getSiteRule } from "@/lib/adapters";
-import { DefaultConfig } from "@/lib/configs";
+import { DefaultConfig, llmModelDef } from "@/lib/configs";
 import { logDebugEntry, updateDebugEntry } from "./debug";
 import {
   createImageObservers,
@@ -359,7 +359,7 @@ export default defineContentScript({
                     return resp;
                   }
 
-                  const { translations, context, sourceTexts, gateSkip, gate } =
+                  const { translations, context, sourceTexts, gateSkip, gate, llmPerf } =
                     resp;
                   const timing = {
                     total: duration,
@@ -393,6 +393,12 @@ export default defineContentScript({
                     sourceTexts,
                     translations,
                     timing,
+                    ...(curMode === "webgpu" && llmPerf
+                      ? {
+                          llmPerf,
+                          engine: llmModelDef(debugCtx.llmModel).engine,
+                        }
+                      : {}),
                     ocrMinConfidence: debugCtx.ocrMinConfidence,
                     detectionMinConfidence: debugCtx.detectionMinConfidence,
                     temperature: debugCtx.temperature,

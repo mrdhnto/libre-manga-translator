@@ -1,6 +1,19 @@
-import { MLCEngine } from "@mlc-ai/web-llm";
-import { DefaultConfig } from "./configs";
+import type { MLCEngine } from "@mlc-ai/web-llm";
+import { DefaultConfig, defaultLlmModelId } from "./configs";
 import { buildSiteRulePrompts, buildTranslationPrompts } from "./prompts";
+
+// Dynamic-only: @mlc-ai/web-llm is a multi-MB prebundled file. A static
+// import would bake it into the offscreen page's initial chunk and break the
+// 2MB-per-.js Firefox AMO limit. It loads on the first local-LLM call
+// instead (own async chunk in the pages build). On Firefox builds the branch
+// is statically false (import.meta.env.FIREFOX is build-time replaced), so
+// the bundler drops the 6MB chunk entirely — Firefox uses wllama (GGUF).
+const loadWebLlm = () =>
+  import.meta.env.FIREFOX
+    ? Promise.reject(
+        new Error("web-llm backend excluded from Firefox builds"),
+      )
+    : import("@mlc-ai/web-llm");
 
 let globalEngine: MLCEngine | null = null;
 let currentlyLoadedModel: string | null = null;
@@ -10,7 +23,7 @@ export async function translateLocal(
   targetLang: string,
   sourceLang: string,
   seriesContext?: SeriesContext,
-  model = DefaultConfig.llmModels[0].id,
+  model = defaultLlmModelId(),
   temperature = DefaultConfig.llmTemperature,
 ): Promise<TranslateResult> {
   if (!ocrResults || ocrResults.length === 0) {
@@ -36,7 +49,7 @@ export async function translateLocal(
 export async function makeSiteRuleLocal(
   title: string,
   path: string,
-  model = DefaultConfig.llmModels[0].id,
+  model = defaultLlmModelId(),
   temperature = DefaultConfig.llmTemperature,
 ): Promise<AIGeneratedRule> {
   const { systemPrompt, userPrompt, schema } = buildSiteRulePrompts(
@@ -61,6 +74,7 @@ async function runLLMModel(
   temperature: number,
 ) {
   if (!globalEngine) {
+    const { MLCEngine } = await loadWebLlm();
     globalEngine = new MLCEngine();
   }
 
@@ -69,6 +83,7 @@ async function runLLMModel(
     currentlyLoadedModel = model;
   }
 
+  const t0 = performance.now();
   const reply = await globalEngine.chatCompletion({
     messages: [
       { role: "system", content: systemPrompt },
@@ -80,6 +95,7 @@ async function runLLMModel(
       schema,
     },
   });
+  const totalMs = performance.now() - t0;
 
   const resultText = reply.choices[0].message.content as string;
 
@@ -89,9 +105,36 @@ async function runLLMModel(
       .replace(/```$/im, "")
       .trim();
 
-    return JSON.parse(cleanJsonString);
+    const parsed = JSON.parse(cleanJsonString);
+    const llmPerf = extractWebLlmPerf(reply, totalMs);
+    if (llmPerf && typeof parsed === "object" && parsed !== null) {
+      (parsed as TranslateResult).llmPerf = llmPerf;
+    }
+    return parsed;
   } catch (error) {
     console.error("Failed to parse LLM output:", resultText);
     throw new Error("Local LLM generated invalid JSON");
   }
+}
+
+/** Token stats from WebLLM usage (prefill/decode rates live in extra). */
+function extractWebLlmPerf(
+  reply: { usage?: { prompt_tokens?: number; completion_tokens?: number; extra?: { prefill_tokens_per_s?: number; decode_tokens_per_s?: number } } },
+  totalMs: number,
+): LlmPerf | undefined {
+  const usage = reply?.usage;
+  if (!usage) return undefined;
+  const promptTps = usage.extra?.prefill_tokens_per_s;
+  const genTps = usage.extra?.decode_tokens_per_s;
+  return {
+    ...(usage.prompt_tokens !== undefined
+      ? { promptTokens: usage.prompt_tokens }
+      : {}),
+    ...(usage.completion_tokens !== undefined
+      ? { completionTokens: usage.completion_tokens }
+      : {}),
+    ...(promptTps !== undefined ? { promptTps } : {}),
+    ...(genTps !== undefined ? { genTps } : {}),
+    totalMs,
+  };
 }

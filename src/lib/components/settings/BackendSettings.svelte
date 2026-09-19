@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { DefaultConfig } from "@/lib/configs";
+  import {
+    DefaultConfig,
+    defaultLlmModelId,
+    visibleLlmModels,
+  } from "@/lib/configs";
   import { openSetupTab } from "@/lib/utils";
   import {
     Download,
@@ -11,7 +15,7 @@
 
   let {
     currentMode = "webgpu",
-    llmModel = $bindable(DefaultConfig.llmModels[0].id),
+    llmModel = $bindable(defaultLlmModelId()),
     llmTemperature = $bindable(DefaultConfig.llmTemperature),
     serverHost = $bindable(DefaultConfig.serverHost),
     serverSchema = $bindable(DefaultConfig.serverSchema),
@@ -102,7 +106,7 @@
         for="llm-model"
         class="text-[10px] font-bold uppercase tracking-widest text-zinc-500"
       >
-        Local WebLLM Model
+        Local LLM Model
       </label>
       <div class="flex gap-2">
         <select
@@ -110,7 +114,7 @@
           bind:value={llmModel}
           class="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2.5 text-sm outline-none cursor-pointer shadow-sm"
         >
-          {#each DefaultConfig.llmModels as model}
+          {#each visibleLlmModels() as model}
             <option value={model.id}>{model.label}</option>
           {/each}
         </select>

@@ -15,7 +15,11 @@
     LoaderCircle,
     HardDrive,
   } from "lucide-svelte";
-  import { DefaultConfig } from "@/lib/configs";
+  import {
+    DefaultConfig,
+    defaultLlmModelId,
+    llmModelDef,
+  } from "@/lib/configs";
   import DetectionSettings from "./settings/DetectionSettings.svelte";
   import OcrSettings from "./settings/OcrSettings.svelte";
   import BackendSettings from "./settings/BackendSettings.svelte";
@@ -38,7 +42,7 @@
   let detectionAutoUpdate = $state(true);
   let ocrMinConfidence = $state(DefaultConfig.ocrMinConfidence);
   let scriptGate = $state(DefaultConfig.scriptGate);
-  let llmModel = $state(DefaultConfig.llmModels[0].id);
+  let llmModel = $state(defaultLlmModelId());
   let llmTemperature = $state(DefaultConfig.llmTemperature);
   let serverHost = $state(DefaultConfig.serverHost);
   let serverSchema = $state(DefaultConfig.serverSchema);
@@ -191,7 +195,7 @@
       targetLang = saved["sync:target-lang"] ?? targetLang;
       textFont = saved["sync:text-font"] ?? textFont;
       customFonts = Array.isArray(saved["local:custom-fonts"]) ? saved["local:custom-fonts"] : [];
-      llmModel = saved["sync:llm-model"] ?? llmModel;
+      llmModel = llmModelDef(saved["sync:llm-model"] ?? llmModel).id;
       llmTemperature = saved["sync:llm-temperature"] ?? llmTemperature;
       serverHost = saved["local:server-host"] ?? serverHost;
       serverSchema = saved["local:server-schema"] ?? serverSchema;

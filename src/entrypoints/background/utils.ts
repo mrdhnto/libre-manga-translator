@@ -1,4 +1,10 @@
+/** Firefox MV2 has no offscreen API — inference runs in the background page. */
+export function hasOffscreenApi(): boolean {
+  return typeof browser.offscreen !== "undefined";
+}
+
 export async function ensureOffscreen() {
+  if (!hasOffscreenApi()) return;
   if (await browser.offscreen.hasDocument()) return;
 
   await browser.offscreen.createDocument({

@@ -1,6 +1,7 @@
 import { env } from "@/lib/env";
 import { downloadArtifactHF, arrayBufferToBase64DataUrl } from "@/lib/utils";
-import { detectHardware, ensureOffscreen } from "./utils";
+import { detectHardware, ensureOffscreen, hasOffscreenApi } from "./utils";
+import { handleOffscreenMessage } from "@/lib/inference";
 import { DefaultConfig } from "@/lib/configs";
 import { testServerConnection } from "@/lib/server/main";
 import { createAsyncResponder, keepAliveWhile, withTimeout } from "./messaging";
@@ -181,19 +182,25 @@ export default defineBackground(() => {
           type: `OFFSCREEN_${msg.type}`,
         });
 
+      // Firefox MV2 has no offscreen document — run the same handlers in
+      // the (persistent, DOM-capable) background page instead.
+      const runLocal = () =>
+        handleOffscreenMessage({ ...msg, type: `OFFSCREEN_${msg.type}` });
+
+      const task = () =>
+        hasOffscreenApi()
+          ? ensureOffscreen()
+              .then(forward)
+              .catch(async () => {
+                // Offscreen may be dead (e.g. CSP crash) - recreate and retry once.
+                await browser.offscreen.closeDocument().catch(() => {});
+                await ensureOffscreen();
+                return forward();
+              })
+          : runLocal();
+
       keepAliveWhile(
-        withTimeout(
-          ensureOffscreen()
-            .then(forward)
-            .catch(async () => {
-              // Offscreen may be dead (e.g. CSP crash) - recreate and retry once.
-              await browser.offscreen.closeDocument().catch(() => {});
-              await ensureOffscreen();
-              return forward();
-            }),
-          timeoutMs,
-          msg.type,
-        )
+        withTimeout(task(), timeoutMs, msg.type)
           .then(respond)
           .catch(respondErr),
       );
@@ -274,8 +281,12 @@ export default defineBackground(() => {
                 continue;
               }
 
-              let category: "Detection" | "OCR" | "Inpaint" | "Script Gate" | "Other" = "Other";
+              let category: "Detection" | "OCR" | "Inpaint" | "Script Gate" | "LLM" | "Other" = "Other";
               let name = url.split("/").pop() ?? url;
+              // Set when the cached file is a wllama GGUF: the entry is
+              // reported as an LLM (deleted via the offscreen engine, which
+              // also unloads it) instead of a raw cache file.
+              let llmModelId: string | null = null;
 
               if (url.includes("lama-manga") || cacheName.includes("lama-manga")) {
                 category = "Inpaint";
@@ -298,16 +309,28 @@ export default defineBackground(() => {
               } else if (url.includes("osd_lstm") || url.includes("osd_labels")) {
                 category = "Script Gate";
                 name = `Script Gate (${url.split("/").pop()})`;
+              } else if (url.endsWith(".gguf")) {
+                // wllama on-device LLM (Firefox build): real blob size is
+                // already measured above; match the configured GGUF model
+                // for a friendly label.
+                const ggufDef = (DefaultConfig.llmModels as { id: string; label: string; file?: string }[]).find(
+                  (m) => m.file && url.endsWith(`/${m.file}`),
+                );
+                category = "LLM";
+                name = ggufDef
+                  ? `${ggufDef.label} (${ggufDef.file})`
+                  : `LLM (${url.split("/").pop()})`;
+                llmModelId = ggufDef?.id ?? null;
               }
 
               results.push({
-                id: `${cacheName}::${url}`,
+                id: llmModelId ? `llm::${llmModelId}` : `${cacheName}::${url}`,
                 name,
                 category,
                 size,
                 cacheName,
-                url,
-                isLlm: false,
+                url: llmModelId ?? url,
+                isLlm: llmModelId !== null,
               });
             }
 
@@ -325,12 +348,15 @@ export default defineBackground(() => {
           const items = await storage.getItems(["local:cached-llms"]);
           const cachedLlms = (items[0]?.value as string[]) || [];
           for (const modelId of cachedLlms) {
-            const foundDef = DefaultConfig.llmModels.find((m) => m.id === modelId);
+            const foundDef = (DefaultConfig.llmModels as { id: string; label: string; engine?: string; bytes?: number }[]).find((m) => m.id === modelId);
+            // wllama GGUF models are enumerated from their CacheStorage
+            // entry above (real blob size) — skip here to avoid duplicates.
+            if (foundDef?.engine === "wllama") continue;
             results.push({
               id: `llm::${modelId}`,
               name: foundDef ? `${foundDef.label} (${modelId})` : modelId,
               category: "LLM",
-              size: modelId.includes("4B") ? 3.4 * 1024 * 1024 * 1024 : 5.7 * 1024 * 1024 * 1024,
+              size: foundDef?.bytes ?? (modelId.includes("4B") ? 3.4 * 1024 * 1024 * 1024 : 5.7 * 1024 * 1024 * 1024),
               cacheName: "webllm",
               url: modelId,
               isLlm: true,
@@ -352,11 +378,16 @@ export default defineBackground(() => {
       const task = async () => {
         const { isLlm, modelId, cacheName, url } = msg.data;
         if (isLlm && modelId) {
-          await ensureOffscreen();
-          await browser.runtime.sendMessage({
+          const payload = {
             type: "OFFSCREEN_DELETE_LLM_CACHE",
             data: { modelId },
-          });
+          };
+          if (hasOffscreenApi()) {
+            await ensureOffscreen();
+            await browser.runtime.sendMessage(payload);
+          } else {
+            await handleOffscreenMessage(payload);
+          }
           const items = await storage.getItems(["local:cached-llms"]);
           const cached = (items[0]?.value as string[]) || [];
           await storage.setItem(
@@ -396,10 +427,15 @@ export default defineBackground(() => {
         if (cachedLlms.length > 0) {
           await ensureOffscreen().catch(() => {});
           for (const modelId of cachedLlms) {
-            await browser.runtime.sendMessage({
+            const payload = {
               type: "OFFSCREEN_DELETE_LLM_CACHE",
               data: { modelId },
-            }).catch(() => {});
+            };
+            if (hasOffscreenApi()) {
+              await browser.runtime.sendMessage(payload).catch(() => {});
+            } else {
+              await handleOffscreenMessage(payload).catch(() => {});
+            }
           }
           await storage.setItem("local:cached-llms", []);
         }
@@ -413,20 +449,24 @@ export default defineBackground(() => {
 
     // Delete a cached WebLLM model to free disk space
     if (msg.type === "DELETE_LLM_CACHE") {
-      const forward = () =>
-        browser.runtime.sendMessage({
-          type: "OFFSCREEN_DELETE_LLM_CACHE",
-          data: { modelId: msg.data?.modelId },
-        });
+      const payload = {
+        type: "OFFSCREEN_DELETE_LLM_CACHE",
+        data: { modelId: msg.data?.modelId },
+      };
+      const forward = () => browser.runtime.sendMessage(payload);
 
-      const task = ensureOffscreen()
-        .then(forward)
-        .catch(async () => {
-          // Offscreen may be dead (e.g. CSP crash) - recreate and retry once.
-          await browser.offscreen.closeDocument().catch(() => {});
-          await ensureOffscreen();
-          return forward();
-        })
+      const task = (
+        hasOffscreenApi()
+          ? ensureOffscreen()
+              .then(forward)
+              .catch(async () => {
+                // Offscreen may be dead (e.g. CSP crash) - recreate and retry once.
+                await browser.offscreen.closeDocument().catch(() => {});
+                await ensureOffscreen();
+                return forward();
+              })
+          : handleOffscreenMessage(payload)
+      )
         .then(async (res: any) => {
           if (res?.error) throw new Error(res.error);
           const items = await storage.getItems(["local:cached-llms"]);

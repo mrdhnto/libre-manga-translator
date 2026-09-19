@@ -1,4 +1,5 @@
 /// <reference types="svelte" />
+/// <reference types="vite/client" />
 declare module "*.svelte" {
   import type { ComponentType } from "svelte";
   const component: ComponentType;
@@ -49,6 +50,20 @@ interface TranslateResult {
   translations: Translations;
   sourceTexts?: string[];
   context?: { summary: string; dictionary: string };
+  /** per-request LLM token stats (webgpu/local mode only) */
+  llmPerf?: LlmPerf;
+}
+
+/** Token throughput for one local-LLM request. All fields optional so a
+ *  partial reading (e.g. counts without per-phase rates) still logs. */
+interface LlmPerf {
+  promptTokens?: number;
+  completionTokens?: number;
+  promptMs?: number;
+  genMs?: number;
+  promptTps?: number;
+  genTps?: number;
+  totalMs?: number;
 }
 
 interface DebugEntry {
@@ -72,6 +87,10 @@ interface DebugEntry {
     inpaint?: number;
     total?: number;
   };
+  /** token speed for webgpu/local-LLM requests (absent on api/gemini) */
+  llmPerf?: LlmPerf;
+  /** local engine that served this request (webgpu mode only) */
+  engine?: "wllama" | "webllm";
   ocrMinConfidence?: number;
   detectionMinConfidence?: number;
   temperature?: number;

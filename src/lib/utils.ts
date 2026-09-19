@@ -213,6 +213,11 @@ export async function isArtifactCached(
 
 /**
  * Download an artifact with streaming progress reporting and store in CacheStorage.
+ *
+ * Never buffers the whole file: one tee branch streams straight into the
+ * cache while the other is counted (and discarded) for progress. Buffering
+ * breaks past the ~2GB ArrayBuffer ceiling (e.g. the 2.3GB GGUF), throwing
+ * "ArrayBufferView larger than 2 GB" out of the Response constructor.
  */
 export async function fetchAndCacheWithProgress(
   repoID: string,
@@ -258,32 +263,32 @@ export async function fetchAndCacheWithProgress(
     return;
   }
 
-  const reader = res.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let loaded = 0;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) {
-      chunks.push(value);
-      loaded += value.length;
-      if (onProgress) onProgress(loaded, total);
+  // Tee the stream: one branch flows straight into the cache (never held
+  // in memory), the other is counted for progress and discarded. Memory
+  // stays O(chunk) no matter the file size.
+  const [progressBranch, cacheBranch] = res.body.tee();
+  const counting = (async () => {
+    const reader = progressBranch.getReader();
+    let loaded = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        loaded += value.byteLength;
+        if (onProgress) onProgress(loaded, total);
+      }
     }
-  }
+  })();
 
-  const combined = new Uint8Array(loaded);
-  let offset = 0;
-  for (const chunk of chunks) {
-    combined.set(chunk, offset);
-    offset += chunk.length;
-  }
-
-  const finalResponse = new Response(combined, {
-    status: res.status,
-    statusText: res.statusText,
-    headers: res.headers,
-  });
-
-  await cache.put(url, finalResponse);
+  await Promise.all([
+    counting,
+    cache.put(
+      url,
+      new Response(cacheBranch, {
+        status: res.status,
+        statusText: res.statusText,
+        headers: res.headers,
+      }),
+    ),
+  ]);
 }

@@ -233,6 +233,15 @@
               {#if log.timing?.inpaint}
                 <div>Inpaint: {formatDuration(log.timing.inpaint)}</div>
               {/if}
+              {#if log.mode === "webgpu" && (log.llmPerf?.promptTps !== undefined || log.llmPerf?.genTps !== undefined)}
+                <div class="col-span-2">
+                  LLM: {log.llmPerf?.promptTokens ?? "-"} prompt @ {log.llmPerf?.promptTps !== undefined
+                    ? `${log.llmPerf.promptTps.toFixed(1)} tok/s`
+                    : "-"} · {log.llmPerf?.completionTokens ?? "-"} gen @ {log.llmPerf?.genTps !== undefined
+                    ? `${log.llmPerf.genTps.toFixed(1)} tok/s`
+                    : "-"}
+                </div>
+              {/if}
             </div>
 
             <!-- Models & pipeline metadata -->

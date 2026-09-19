@@ -26,6 +26,10 @@ export const env = {
   lamaInpaintModelRepo:
     import.meta.env.WXT_LAMA_INPAINT_MODEL_REPO || "mayocream/lama-manga-onnx",
 
+  // Local LLM (wllama GGUF backend, Firefox build)
+  ggufModelRepo:
+    import.meta.env.WXT_GGUF_MODEL_REPO || "unsloth/Qwen3.5-4B-GGUF",
+
   // Script gate model (Apache-2.0)
   gateModelRepo:
     import.meta.env.WXT_GATE_MODEL_REPO || "ogkalu/image-script-identification",

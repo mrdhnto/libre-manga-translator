@@ -15,7 +15,11 @@
     TriangleAlert,
     Download,
   } from "lucide-svelte";
-  import { DefaultConfig } from "@/lib/configs";
+  import {
+    DefaultConfig,
+    defaultLlmModelId,
+    llmModelDef,
+  } from "@/lib/configs";
   import { env } from "@/lib/env";
   import { untrack } from "svelte";
   import { openSetupTab } from "@/lib/utils";
@@ -85,7 +89,7 @@
   let isFetchingDetection = $state(false);
   let isFetchingOCR = $state(false);
   let cachedLlms = $state<string[]>([]);
-  let llmModel = $state(DefaultConfig.llmModels[0].id);
+  let llmModel = $state(defaultLlmModelId());
   let llmTemperature = $state(DefaultConfig.llmTemperature);
   let serverHost = $state(DefaultConfig.serverHost);
   let serverSchema = $state(DefaultConfig.serverSchema);
@@ -259,7 +263,7 @@
     cachedLlms = Array.isArray(saved["local:cached-llms"])
       ? saved["local:cached-llms"]
       : [];
-    llmModel = saved["sync:llm-model"] ?? llmModel;
+    llmModel = llmModelDef(saved["sync:llm-model"] ?? llmModel).id;
     llmTemperature = saved["sync:llm-temperature"] ?? llmTemperature;
     serverHost = saved["local:server-host"] ?? serverHost;
     serverSchema = saved["local:server-schema"] ?? serverSchema;

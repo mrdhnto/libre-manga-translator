@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "@mlc-ai/web-llm": "^0.2.82",
+    "@wllama/wllama": "^3.6.1",
     "lucide-svelte": "^0.563.0",
     "onnxruntime-web": "^1.24.2"
   },
