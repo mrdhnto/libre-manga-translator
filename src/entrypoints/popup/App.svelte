@@ -40,7 +40,7 @@
   let seriesName = "Unknown Series";
   let ruleId = $state("");
   let activeTab = $state("home");
-  let shareData = $state(true);
+  let shareData = $state(false);
   let geminiKey = $state("");
   let geminiModel = $state(DefaultConfig.geminiModels[0].id);
   let currentMode = $state(DefaultConfig.currentMode);
