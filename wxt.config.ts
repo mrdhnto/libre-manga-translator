@@ -14,6 +14,14 @@ import pkg from "./package.json";
  * it. @mlc-ai/web-llm is additionally dynamic-import()ed at its three use
  * sites (lib/webllm.ts, setup page, offscreen cache-delete) so it never
  * lands in an initial chunk.
+ *
+ * NOTE: the background entry must additionally stay free of static inference
+ * imports (lib/inference.ts pulls onnxruntime-web + the whole pipeline and
+ * would be inlined into background.js). Firefox inference runs in
+ * offscreen.html inside a hidden background-page iframe and shares the
+ * pages build's split ort/wllama chunks — see
+ * background/utils.ts ensureFirefoxInferencePage. ORT-bound downloads live
+ * in lib/models.ts, never lib/utils.ts, for the same reason.
  */
 const vendorChunkGuard = () => ({
   name: "lmt-vendor-chunk-guard",
@@ -100,18 +108,29 @@ export default defineConfig({
     // Fixed add-on ID: Firefox disables storage.sync for temporary install
     // IDs, which breaks onboarding/settings on sideloaded dev builds. AMO
     // requires a fixed ID at submission anyway. Chrome ignores this key.
+    // strict_min_version 140: the built-in data-consent UI backing
+    // data_collection_permissions (see the hook below) only exists on
+    // FF140+ — older versions would need a custom fallback consent flow.
     browser_specific_settings: {
       gecko: {
         id: "libre-manga-translator@mrdhnto",
+        strict_min_version: "140.0",
       },
     },
   },
 
   // "offscreen" is Chrome-only: Firefox rejects it with a manifest
-  // warning (and has no offscreen API — inference runs in the background
-  // page, see lib/inference.ts). Strip it from Firefox builds only.
+  // warning (and has no offscreen API — inference runs in offscreen.html
+  // hosted in a hidden background-page iframe, see
+  // background/utils.ts ensureFirefoxInferencePage). Strip it from Firefox
+  // builds only.
   // Same hook also swaps the CSP per build: Chrome keeps the strict
   // default above, Firefox gains worker-src blob: for the wllama worker.
+  // The hook is also where Firefox gains data_collection_permissions: WXT's
+  // UserManifest type does not know that gecko subkey, so declaring it in
+  // the manifest block above would fail typechecking. Declared collection
+  // (privacy.md: opt-in telemetry URLs + content-derived boxes/metadata,
+  // Gemini/API-mode payloads) is all user-opt-in, hence required ["none"].
   hooks: {
     "build:manifestGenerated": (wxt: any, manifest: any) => {
       if (wxt.config.browser === "firefox") {
@@ -123,6 +142,12 @@ export default defineConfig({
         manifest.content_security_policy ??= {};
         manifest.content_security_policy.extension_pages =
           "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self' blob:";
+        manifest.browser_specific_settings ??= {};
+        manifest.browser_specific_settings.gecko ??= {};
+        manifest.browser_specific_settings.gecko.data_collection_permissions = {
+          required: ["none"],
+          optional: ["websiteActivity", "websiteContent"],
+        };
       }
     },
   },

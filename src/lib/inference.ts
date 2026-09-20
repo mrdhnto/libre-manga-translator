@@ -1,8 +1,11 @@
 // Shared heavy-inference handlers. Executed in the offscreen document on
-// Chrome (MV3, via OFFSCREEN_* messages) and directly in the background page
-// on Firefox (MV2 has no offscreen API). Keep this module free of CSS
-// imports and DOM-at-import-time side effects so the background bundle stays
-// clean on both targets.
+// Chrome (MV3, via OFFSCREEN_* messages) and in offscreen.html hosted in a
+// hidden background-page iframe on Firefox (MV2 has no offscreen API — see
+// ensureFirefoxInferencePage). This module must never be statically imported
+// by the background or content-script entries: it pulls onnxruntime-web and
+// the full detection/OCR/inpaint pipeline, which would bust the single-file
+// AMO size limit. Keep it free of CSS imports and DOM-at-import-time side
+// effects so it stays clean in both hosts.
 import { detectTextBubble } from "./detections/main";
 import { makeSiteRuleWithGemini, translateWithGemini } from "./gemini/main";
 import { textRecognise } from "./ocr/main";
@@ -16,7 +19,8 @@ import {
 // Firefox AMO limit. Same for @wllama/wllama (lib/wllama.ts).
 import { makeSiteRuleLocal, translateLocal } from "./webllm";
 import type { WllamaGpuCapability } from "./wllama";
-import { llmModelDef } from "./configs";
+import { DefaultConfig, llmModelDef } from "./configs";
+import { downloadArtifactHF } from "./models";
 import { inpaintImageTelea } from "./inpaint/telea";
 import { inpaintImageAuto } from "./inpaint/ladder";
 import { getCachedSegmentation } from "./detections/segmentation";
@@ -290,6 +294,45 @@ export async function handleDeleteLlmCache(msg: any): Promise<{ success: true }>
   return { success: true };
 }
 
+export async function handlePrefetchModel(msg: any): Promise<{ success: true }> {
+  const { type, data } = msg.data;
+
+  if (type === "inpaint") {
+    await downloadArtifactHF(
+      DefaultConfig.lamaRepo,
+      DefaultConfig.lamaModelPath,
+      false,
+      true,
+    );
+  } else if (type === "ocr") {
+    if (data === "manga-ocr") {
+      await Promise.all([
+        downloadArtifactHF(DefaultConfig.mangaOcrRepo, "encoder_model.onnx", false, true),
+        downloadArtifactHF(DefaultConfig.mangaOcrRepo, "decoder_model.onnx", false, true),
+        downloadArtifactHF(DefaultConfig.mangaOcrRepo, "vocab.txt", false, true),
+      ]);
+    } else {
+      const lang = data && data !== "paddle" ? data : "chinese";
+      await downloadArtifactHF(DefaultConfig.ocrRepo, DefaultConfig.ocrModelPath(lang), false, true);
+      await downloadArtifactHF(DefaultConfig.ocrRepo, DefaultConfig.ocrDictPath(lang), false, true);
+    }
+  } else if (type === "detection") {
+    if (data === "comic-bubble") {
+      await downloadArtifactHF(DefaultConfig.rtdetrModelRepo, "detector-v4-s_int8.onnx", false, true);
+    } else if (data === "comic-text-detector") {
+      await downloadArtifactHF(
+        "direct-model-cache",
+        DefaultConfig.comicTextDetectorUrl,
+        false,
+        true,
+      );
+    } else {
+      await downloadArtifactHF(DefaultConfig.detectionModelRepo, DefaultConfig.detectionModelPath(data), false, true);
+    }
+  }
+  return { success: true };
+}
+
 export async function handleOffscreenMessage(msg: any): Promise<unknown> {
   switch (msg.type) {
     case "OFFSCREEN_DETECT_BBOX":
@@ -302,6 +345,8 @@ export async function handleOffscreenMessage(msg: any): Promise<unknown> {
       return handleInpaintImage(msg);
     case "OFFSCREEN_DELETE_LLM_CACHE":
       return handleDeleteLlmCache(msg);
+    case "OFFSCREEN_PREFETCH_MODEL":
+      return handlePrefetchModel(msg);
     default:
       throw new Error(`Unknown offscreen message: ${msg.type}`);
   }

@@ -14,6 +14,7 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "check:inpaint": "bun scripts/inpaint-selfcheck.ts",
     "check:gate": "bun scripts/gate-selfcheck.ts",
+    "check:size": "bun scripts/check-bundle-size.ts .output/firefox-mv2",
     "postinstall": "wxt prepare"
   },
   "devDependencies": {

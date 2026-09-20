@@ -1,7 +1,7 @@
 # Privacy Policy
 
 **Effective Date:** September 16, 2026
-**Last Updated:** September 16, 2026
+**Last Updated:** September 19, 2026
 
 This Privacy Policy describes how Libre Manga Translator ("LMT," "the Extension," "we," "us," or "our") handles information when you install and use the LMT browser extension. Please read it carefully before using the Extension.
 
@@ -34,21 +34,22 @@ When you use LMT in WebGPU Mode (the default), this guarantee holds:
 
 All of the following processing occurs exclusively within your browser's sandboxed extension environment, on your local hardware:
 
-- **Bubble detection:** A YOLO-Nano or YOLO-Small ONNX model runs inside a dedicated offscreen document via ONNX Runtime Web. No image data leaves this sandboxed context.
+- **Bubble detection:** A YOLO26-Nano or YOLO26-Small ONNX model (or the RT-DETR bubble detector / ComicTextDetector alternatives you select in Settings) runs inside an isolated extension context (offscreen document on Chrome, hidden background-page frame on Firefox) via ONNX Runtime Web. No image data leaves this sandboxed context.
 - **Script verification:** A lightweight script-identification LSTM model (OSD, ~3.7 MB, Apache-2.0 licensed) runs on-device to verify detected regions contain the source language before translation. This gate model is downloaded from Hugging Face on first use and runs entirely locally.
-- **Text extraction:** PaddleOCR ONNX model processes the content of each detected bounding box on-device.
-- **Inpainting:** Pure-JS engine ladder (planar fill, bilateral denoise, Telea fast-marching) with automatic quality-gated escalation removes text from speech bubbles on-device before rendering translations. The engine selection is automatic and runs entirely locally.
-- **Translation:** WebLLM loads a local language model (Qwen3-4B or Qwen3-8B) into memory and performs inference using your device's GPU via WebGPU. No text is transmitted to any external endpoint.
+- **Text extraction:** The on-device OCR engine you select in Settings (PaddleOCR multilingual default, or the Manga-OCR Japanese specialist) processes the content of each detected bounding box on-device.
+- **Inpainting:** The auto engine ladder (pure-JS planar fill, bilateral denoise, Telea fast-marching, plus the opt-in LaMa redraw model) with automatic quality-gated escalation removes text from speech bubbles on-device before rendering translations. The engine selection is automatic and runs entirely locally.
+- **Translation:** A local language model runs in-memory and performs inference on your device's GPU (via WebGPU) or CPU. Chrome builds use WebLLM (Qwen3-4B or Qwen3-8B); Firefox builds use wllama (Qwen3.5-4B GGUF). No text is transmitted to any external endpoint.
 - **Result rendering:** Translated text is painted onto the inpainted page using a canvas overlay that exists only in your browser tab.
 
 ### Model weights
 
 The model weights are downloaded from [Hugging Face](https://huggingface.co) when the Extension is first installed or when a model update is available. This includes:
 
-- **YOLO bubble detection model** (YOLO26-Nano or YOLO26-Small)
+- **YOLO bubble detection model** (YOLO26-Nano or YOLO26-Small; RT-DETR and ComicTextDetector alternatives download only if you select them)
 - **Script gate model** (OSD script-identification LSTM, ~3.7 MB, Apache-2.0)
-- **PaddleOCR text extraction model**
-- **WebLLM translation model** (Qwen3-4B or Qwen3-8B, WebGPU Mode only)
+- **OCR text extraction model** (PaddleOCR multilingual, or Manga-OCR Japanese specialist if selected)
+- **Local translation model** (Qwen3 via WebLLM on Chrome; Qwen3.5-4B GGUF via wllama on Firefox, WebGPU Mode only)
+- **Inpainting redraw model** (LaMa, ~207 MB, only if you enable the LaMa toggle)
 
 These downloads involve only the model weight files and do not include any of your manga images or personal data. Hugging Face's own privacy policy governs those download requests.
 
@@ -69,7 +70,7 @@ When Gemini Mode is active and you confirm a translation, the following data is 
 
 ### What is not transmitted in Gemini Mode
 
-Your Gemini API key is stored locally in the Extension's storage and is sent only to Google's API endpoint. It is never transmitted to LMT's servers or any other third party, because no LMT-operated server exists.
+Your Gemini API key is stored locally in the Extension's storage and is sent only to Google's API endpoint. It is never transmitted to our telemetry backend or any other third party. LMT operates no inference or proxy servers.
 
 LMT does not act as a proxy for your Gemini API requests. The request goes directly from your browser to Google.
 
@@ -91,14 +92,14 @@ LMT offers an optional API Mode that connects to a self-hosted or third-party LL
 
 When API Mode is active and you confirm a translation, the following data is sent directly from your browser to your configured LLM server:
 
-- **Extracted text:** OCR results (text extracted from detected speech bubbles via PaddleOCR running on-device) are sent to your LLM server for translation. The raw page image is never transmitted in API Mode.
+- **Extracted text:** OCR results (text extracted from detected speech bubbles by the on-device OCR engine) are sent to your LLM server for translation. The raw page image is never transmitted in API Mode.
 - **Series context:** Any title, summary, or custom dictionary entries you have set for the active series in the Context tab.
 - **Translation prompt:** A structured prompt requesting translation from the source language to the target language.
 
 ### What is not transmitted in API Mode
 
 - **Raw manga images:** The original page image and inpainted image are processed entirely on-device. Only extracted text is sent to your LLM server.
-- **Your API key (if configured):** If you configure an API key for your self-hosted server, it is stored locally in the Extension's storage and is sent only to your configured server endpoint. It is never transmitted to LMT's servers or any other third party.
+- **Your API key (if configured):** If you configure an API key for your self-hosted server, it is stored locally in the Extension's storage and is sent only to your configured server endpoint. It is never transmitted to our telemetry backend or any other third party.
 
 ### Third-party server data practices
 
@@ -118,9 +119,9 @@ LMT provides an option for users to voluntarily share data to help improve the a
 
 ### What telemetry data contains
 
-If you opt in, the Extension submits the following data to our telemetry database when you manually adjust, add, or delete bounding boxes:
+If you opt in, the Extension submits the following data to our telemetry database when you confirm a translation whose boxes you reviewed (including any you adjusted, added, or deleted):
 
-- **Bounding box coordinates:** The pixel coordinates (x, y, width, height) of each detected and user-adjusted speech bubble, stored as structured JSON.
+- **Bounding box coordinates:** The corner coordinates (x1, y1, x2, y2) plus the detector confidence of each speech bubble, stored as structured JSON.
 - **Image reference / URL:** The image source URL (or the full page URL if the image source is an embedded data/blob URL). The Extension does not upload or transmit raw page image files or base64 payloads to telemetry.
 - **Series metadata:** The series name, chapter identifier, and page index are recorded to organize submissions by source and to avoid counting duplicate pages multiple times.
 
@@ -128,7 +129,7 @@ If you opt in, the Extension submits the following data to our telemetry databas
 
 The telemetry submission is not capable of transmitting personal information. It contains no browser fingerprints, no device identifiers, no account credentials, and no translated or extracted text.
 
-The submission schema is limited to: a random UUID, a timestamp, series name, chapter ID, page index, image/page URL, and the bounding box array. Nothing in that schema can be traced back to a specific person.
+The submission schema is limited to: series name, chapter ID, page index, image/page URL, and the bounding box array. Nothing in that schema can be traced back to a specific person.
 
 ### How telemetry data is used
 
@@ -144,13 +145,14 @@ Telemetry data is stored in our database backend (such as Cloudflare D1 / server
 
 The Extension stores certain data locally in your browser using the `chrome.storage` API (or its Firefox equivalent). This data never leaves your device unless you explicitly use Gemini Mode or API Mode as described in Sections 3 and 4. Locally stored data includes:
 
-- **Extension settings:** Your selected operating mode (WebGPU, Gemini, or API), model size preference, minimum confidence threshold, font selection, server configuration (API Mode), auto-update preference, inpainting method preference (Auto/Telea/Fast), and script gate toggle.
+- **Extension settings:** Your selected operating mode (WebGPU, Gemini, or API), detection model, OCR engine, local LLM model, detection and OCR confidence thresholds, font selection, server configuration (API Mode), auto-update preference, inpainting method preference (Auto/Telea/Fast), LaMa redraw toggle, and script gate toggle.
 - **Your Gemini API key (Gemini Mode only):** Stored in local extension storage. Never transmitted to LMT's servers.
 - **Your LLM server API key (API Mode only):** Stored in local extension storage. Never transmitted to LMT's servers.
 - **Series context:** Any title, summary, and custom dictionary data you create in the Context tab. Stored locally and, in Gemini Mode or API Mode, transmitted to Google's Gemini API or your configured LLM server as part of the translation prompt.
 - **Translation history:** The last five translation results per series, stored locally to provide context for subsequent page translations. This data remains on your device.
-- **Translation cache:** Translated page images are cached locally per series/chapter/page to avoid re-translating the same page. This data remains on your device.
-- **Inpainted image cache:** Inpainted base images (text removed via the auto engine ladder: planar fill, bilateral denoise, or Telea fast-marching) are cached locally per image source during a translation session to enable fast text redrawing. This cache is cleared when you close the translation overlay.
+- **Translation cache:** Translation results (boxes, translations, source texts) are cached locally per series/chapter/page to avoid re-translating the same page. This data remains on your device.
+- **Inpainted image cache:** Inpainted base images (text removed via the auto engine ladder: planar fill, bilateral denoise, Telea fast-marching, or opt-in LaMa redraw) are cached locally per image source during a translation session to enable fast text redrawing. This cache is cleared when you close the translation overlay.
+- **Custom fonts:** Any font files you upload for rendering are stored locally in extension storage. They never leave your device.
 - **Onboarding state:** A flag indicating whether you have completed the onboarding flow and your telemetry opt-in decision.
 
 You may clear all locally stored Extension data at any time by uninstalling the Extension or by clearing browser extension storage through your browser's developer tools.
@@ -165,10 +167,11 @@ LMT interacts with the following third-party services under the conditions speci
 
 Model weight files are downloaded from Hugging Face's model hosting infrastructure on first install and when model updates are available (if Auto-Update is enabled in Settings). The following models are downloaded:
 
-- **YOLO bubble detection** (Kiuyha/Manga-Bubble-YOLO)
+- **YOLO bubble detection** (Kiuyha/Manga-Bubble-YOLO; RT-DETR and ComicTextDetector alternatives from their upstreams only if selected)
 - **Script gate** (ogkalu/image-script-identification, Apache-2.0)
-- **PaddleOCR text extraction** (monkt/paddleocr-onnx)
-- **WebLLM translation** (Qwen3 models via WebLLM, WebGPU Mode only)
+- **OCR text extraction** (monkt/paddleocr-onnx; Manga-OCR from mayocream/manga-ocr-onnx only if selected)
+- **Local translation** (Qwen3 models via WebLLM on Chrome; Qwen3.5-4B GGUF via wllama on Firefox, WebGPU Mode only)
+- **Inpainting redraw** (LaMa from mayocream/lama-manga-onnx, only if the LaMa toggle is enabled)
 
 The download requests contain no user content. Hugging Face may log standard server request metadata, such as IP address, per its own privacy policy.
 
@@ -219,8 +222,8 @@ All prior versions of this Privacy Policy are available in the commit history of
 
 ## 11. Contact
 
-LMT is an open-source project maintained by LMT Maintainer. If you have questions, concerns, or requests regarding this Privacy Policy or data handling practices, please contact us through one of the following channels:
+LMT is an open-source project maintained by LMT Maintainer. If you have questions, concerns, or requests regarding this Privacy Policy or data handling practices, please contact us here:
 
-- **GitHub Issues:** Open an issue at the LMT repository labeled "Privacy".
+- **GitHub Issues:** Open an issue labeled "Privacy" at the LMT repository (https://github.com/mrdhnto/libre-manga-translator/issues).
 
 We will make reasonable efforts to respond to privacy-related inquiries within 30 days of receipt.

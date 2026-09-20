@@ -1,7 +1,11 @@
 import { env } from "@/lib/env";
-import { downloadArtifactHF, arrayBufferToBase64DataUrl } from "@/lib/utils";
-import { detectHardware, ensureOffscreen, hasOffscreenApi } from "./utils";
-import { handleOffscreenMessage } from "@/lib/inference";
+import { arrayBufferToBase64DataUrl } from "@/lib/utils";
+import {
+  detectHardware,
+  ensureFirefoxInferencePage,
+  ensureOffscreen,
+  hasOffscreenApi,
+} from "./utils";
 import { DefaultConfig } from "@/lib/configs";
 import { testServerConnection } from "@/lib/server/main";
 import { createAsyncResponder, keepAliveWhile, withTimeout } from "./messaging";
@@ -33,6 +37,27 @@ export default defineBackground(() => {
     } else {
       await browser.tabs.create({ url: targetUrl });
     }
+  }
+
+  // Route heavy inference to its dedicated context and return the result.
+  // - Chrome (MV3): the offscreen document (offscreen API).
+  // - Firefox (MV2, no offscreen API): offscreen.html in a hidden iframe
+  //   inside the persistent background page (see ensureFirefoxInferencePage).
+  //   background.js itself stays free of inference code so every emitted .js
+  //   stays under the AMO validation limit.
+  function forwardToInference(message: unknown): Promise<unknown> {
+    const forward = () => browser.runtime.sendMessage(message);
+    if (hasOffscreenApi()) {
+      return ensureOffscreen()
+        .then(forward)
+        .catch(async () => {
+          // Offscreen may be dead (e.g. CSP crash) - recreate and retry once.
+          await browser.offscreen.closeDocument().catch(() => {});
+          await ensureOffscreen();
+          return forward();
+        });
+    }
+    return ensureFirefoxInferencePage().then(forward);
   }
 
   // Make Context menu (Popup shows on right click)
@@ -171,7 +196,8 @@ export default defineBackground(() => {
       return true;
     }
 
-    // Forwarding heavy inference to the offscreen document
+    // Forwarding heavy inference to its dedicated context (offscreen
+    // document on Chrome, hidden offscreen.html iframe on Firefox)
     if (
       ["DETECT_BBOX", "TRANSLATE_IMAGE", "MAKE_SITE_RULE_AI", "INPAINT_IMAGE"].includes(
         msg.type,
@@ -182,28 +208,11 @@ export default defineBackground(() => {
           ? 180_000
           : 90_000;
 
-      const forward = () =>
-        browser.runtime.sendMessage({
+      const task = () =>
+        forwardToInference({
           ...msg,
           type: `OFFSCREEN_${msg.type}`,
         });
-
-      // Firefox MV2 has no offscreen document — run the same handlers in
-      // the (persistent, DOM-capable) background page instead.
-      const runLocal = () =>
-        handleOffscreenMessage({ ...msg, type: `OFFSCREEN_${msg.type}` });
-
-      const task = () =>
-        hasOffscreenApi()
-          ? ensureOffscreen()
-              .then(forward)
-              .catch(async () => {
-                // Offscreen may be dead (e.g. CSP crash) - recreate and retry once.
-                await browser.offscreen.closeDocument().catch(() => {});
-                await ensureOffscreen();
-                return forward();
-              })
-          : runLocal();
 
       keepAliveWhile(
         withTimeout(task(), timeoutMs, msg.type)
@@ -388,12 +397,7 @@ export default defineBackground(() => {
             type: "OFFSCREEN_DELETE_LLM_CACHE",
             data: { modelId },
           };
-          if (hasOffscreenApi()) {
-            await ensureOffscreen();
-            await browser.runtime.sendMessage(payload);
-          } else {
-            await handleOffscreenMessage(payload);
-          }
+          await forwardToInference(payload);
           const items = await storage.getItems(["local:cached-llms"]);
           const cached = (items[0]?.value as string[]) || [];
           await storage.setItem(
@@ -431,17 +435,17 @@ export default defineBackground(() => {
         const items = await storage.getItems(["local:cached-llms"]);
         const cachedLlms = (items[0]?.value as string[]) || [];
         if (cachedLlms.length > 0) {
-          await ensureOffscreen().catch(() => {});
+          if (hasOffscreenApi()) {
+            await ensureOffscreen().catch(() => {});
+          } else {
+            await ensureFirefoxInferencePage().catch(() => {});
+          }
           for (const modelId of cachedLlms) {
             const payload = {
               type: "OFFSCREEN_DELETE_LLM_CACHE",
               data: { modelId },
             };
-            if (hasOffscreenApi()) {
-              await browser.runtime.sendMessage(payload).catch(() => {});
-            } else {
-              await handleOffscreenMessage(payload).catch(() => {});
-            }
+            await browser.runtime.sendMessage(payload).catch(() => {});
           }
           await storage.setItem("local:cached-llms", []);
         }
@@ -459,20 +463,8 @@ export default defineBackground(() => {
         type: "OFFSCREEN_DELETE_LLM_CACHE",
         data: { modelId: msg.data?.modelId },
       };
-      const forward = () => browser.runtime.sendMessage(payload);
 
-      const task = (
-        hasOffscreenApi()
-          ? ensureOffscreen()
-              .then(forward)
-              .catch(async () => {
-                // Offscreen may be dead (e.g. CSP crash) - recreate and retry once.
-                await browser.offscreen.closeDocument().catch(() => {});
-                await ensureOffscreen();
-                return forward();
-              })
-          : handleOffscreenMessage(payload)
-      )
+      const task = forwardToInference(payload)
         .then(async (res: any) => {
           if (res?.error) throw new Error(res.error);
           const items = await storage.getItems(["local:cached-llms"]);
@@ -504,48 +496,18 @@ export default defineBackground(() => {
       return true;
     }
 
-    // Caching model when user changes specific settings
+    // Warm the model cache when the user changes specific settings. Runs in
+    // the inference context (it creates ORT sessions) so background.js stays
+    // free of onnxruntime-web.
     if (msg.type === "PREFETCH_MODEL") {
-      const { type, data } = msg.data;
-
-      const runPrefetch = async () => {
-        if (type === "inpaint") {
-          await downloadArtifactHF(
-            DefaultConfig.lamaRepo,
-            DefaultConfig.lamaModelPath,
-            false,
-            true,
-          );
-        } else if (type === "ocr") {
-          if (data === "manga-ocr") {
-            await Promise.all([
-              downloadArtifactHF(DefaultConfig.mangaOcrRepo, "encoder_model.onnx", false, true),
-              downloadArtifactHF(DefaultConfig.mangaOcrRepo, "decoder_model.onnx", false, true),
-              downloadArtifactHF(DefaultConfig.mangaOcrRepo, "vocab.txt", false, true),
-            ]);
-          } else {
-            const lang = data && data !== "paddle" ? data : "chinese";
-            await downloadArtifactHF(DefaultConfig.ocrRepo, DefaultConfig.ocrModelPath(lang), false, true);
-            await downloadArtifactHF(DefaultConfig.ocrRepo, DefaultConfig.ocrDictPath(lang), false, true);
-          }
-        } else if (type === "detection") {
-          if (data === "comic-bubble") {
-            await downloadArtifactHF(DefaultConfig.rtdetrModelRepo, "detector-v4-s_int8.onnx", false, true);
-          } else if (data === "comic-text-detector") {
-            await downloadArtifactHF(
-              "direct-model-cache",
-              DefaultConfig.comicTextDetectorUrl,
-              false,
-              true,
-            );
-          } else {
-            await downloadArtifactHF(DefaultConfig.detectionModelRepo, DefaultConfig.detectionModelPath(data), false, true);
-          }
-        }
-        return { success: true };
-      };
-
-      keepAliveWhile(runPrefetch().then(respond).catch(respondErr));
+      keepAliveWhile(
+        forwardToInference({
+          type: "OFFSCREEN_PREFETCH_MODEL",
+          data: msg.data,
+        })
+          .then(respond)
+          .catch(respondErr),
+      );
 
       return true;
     }

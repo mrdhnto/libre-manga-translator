@@ -1,5 +1,5 @@
 import * as ort from "onnxruntime-web/all";
-import { downloadArtifactFromUrl, downloadArtifactHF } from "../utils";
+import { downloadArtifactFromUrl, downloadArtifactHF } from "../models";
 import { scalingImage, restoreBoundingBox, containmentNMS } from "./utils";
 import { refineDetections } from "./boxes";
 import { DefaultConfig } from "../configs";

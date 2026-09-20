@@ -1,5 +1,5 @@
 import * as ort from "onnxruntime-web/all";
-import { downloadArtifactHF } from "../utils";
+import { downloadArtifactHF } from "../models";
 import { DefaultConfig } from "../configs";
 import { ctcBestPath, osdPreprocess } from "./ctc";
 import { judgeVotes, type LineScript, type RegionVerdict } from "./index";
