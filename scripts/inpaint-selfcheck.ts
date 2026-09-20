@@ -10,6 +10,7 @@
  */
 import {
   buildInkSeed,
+  buildSegmentationSeed,
   maskCount,
   type Mask,
 } from "../src/lib/inpaint/mask";
@@ -22,6 +23,7 @@ import {
 import { fitMask } from "../src/lib/inpaint/fit";
 import { renderFill } from "../src/lib/inpaint/fill";
 import { regionDeclines } from "../src/lib/inpaint/quality";
+import { AlphaRamp, planTiles, tileOrigins } from "../src/lib/inpaint/lama";
 
 let failures = 0;
 const check = (name: string, cond: boolean) => {
@@ -209,6 +211,40 @@ function fitCase(
     "quality: wrong-tone interior declines",
     regionDeclines(fake2, fitted.mask, 1, []),
   );
+
+  // --- Tier 3 checks: segmentation seed & LaMa tiling ---
+  const fakeSeg = new Uint8Array(w * h);
+  // Mark center 5x5 as text (level 200 >= threshold 76)
+  for (let dy = 28; dy < 33; dy++) {
+    for (let dx = 28; dx < 33; dx++) {
+      fakeSeg[dy * w + dx] = 200;
+    }
+  }
+  const segSeed = buildSegmentationSeed(fakeSeg, w, h, w, h, 0, 0, {
+    x1: 20,
+    y1: 20,
+    x2: 40,
+    y2: 40,
+  });
+  check("segmentation: seed marks text pixels", maskCount(segSeed) === 25);
+
+  // LaMa tiling: <= 512 px single centered tile
+  const originsSingle = tileOrigins(100, 200);
+  check("lama: <= 512 extent is single tile", originsSingle.length === 1);
+  check("lama: single tile centered", originsSingle[0] === 100 + 100 - 256);
+
+  // LaMa tiling: > 512 px tiled with overlap
+  const originsMulti = tileOrigins(0, 800);
+  check("lama: > 512 extent creates multiple tiles", originsMulti.length >= 2);
+  const tiles = planTiles({ x: 0, y: 0, w: 800, h: 400 });
+  check("lama: planTiles generates valid tiles", tiles.length >= 2);
+
+  // AlphaRamp values along glyph boundary
+  const ramp = new AlphaRamp(fitted);
+  // Inside center where ink is located (x=55, y=28)
+  check("lama: alpha ramp 1.0 in core", ramp.at(fitted.ink.ox + 55, fitted.ink.oy + 28) === 1.0);
+  // Outside far away
+  check("lama: alpha ramp 0.0 outside", ramp.at(fitted.ink.ox + 5, fitted.ink.oy + 5) === 0.0);
 }
 
 if (failures > 0) {

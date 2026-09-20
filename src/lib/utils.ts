@@ -94,7 +94,19 @@ export async function downloadArtifactHF(
   autoUpdate?: boolean,
   noReturn?: boolean,
 ): Promise<ort.InferenceSession | Response | undefined> {
-  const url = `https://huggingface.co/${repoID}/resolve/main/${path}`;
+  const isDirectUrl =
+    path.startsWith("http://") ||
+    path.startsWith("https://") ||
+    repoID.startsWith("http://") ||
+    repoID.startsWith("https://");
+
+  const url = isDirectUrl
+    ? path.startsWith("http://") || path.startsWith("https://")
+      ? path
+      : `${repoID}/${path}`
+    : `https://huggingface.co/${repoID}/resolve/main/${path}`;
+
+  const cacheName = isDirectUrl ? "direct-model-cache" : repoID;
 
   if (inFlightRequests.has(url)) {
     const result = await inFlightRequests.get(url);
@@ -102,7 +114,7 @@ export async function downloadArtifactHF(
   }
 
   const requestPromise = (async () => {
-    const cache = await caches.open(repoID);
+    const cache = await caches.open(cacheName);
 
     let response = await cache.match(url);
     let needsUpdate = !response;
@@ -116,7 +128,7 @@ export async function downloadArtifactHF(
         const localHash =
           response.headers.get("x-repo-commit") || response.headers.get("etag");
 
-        if (currentHash !== localHash) needsUpdate = true;
+        if (currentHash && localHash && currentHash !== localHash) needsUpdate = true;
       } catch (error) {
         console.warn(
           "Offline: skipping update check and using cache. Error:",
@@ -127,12 +139,13 @@ export async function downloadArtifactHF(
 
     if (!response || needsUpdate) {
       response = await fetch(url);
+      if (!response.ok) throw new Error(`Failed to download model from ${url} (${response.status} ${response.statusText})`);
       await cache.put(url, response.clone());
     }
 
     if (noReturn) return;
 
-    if (path.endsWith(".onnx")) {
+    if (path.endsWith(".onnx") || url.endsWith(".onnx") || url.includes(".onnx?")) {
       return ort.InferenceSession.create(await response.arrayBuffer(), {
         executionProviders: resolveExecutionProviders(),
       });
@@ -151,9 +164,126 @@ export async function downloadArtifactHF(
   }
 }
 
+export async function downloadArtifactFromUrl(
+  url: string,
+  cacheKey: string = "direct-model-cache",
+  autoUpdate = false,
+): Promise<ort.InferenceSession> {
+  const res = await downloadArtifactHF(cacheKey, url, autoUpdate);
+  return res as unknown as ort.InferenceSession;
+}
+
 export async function openSetupTab(modelId?: string, clean?: boolean) {
   await browser.runtime.sendMessage({
     type: "OPEN_SETUP_TAB",
     data: { modelId, clean },
   });
+}
+
+/**
+ * Check if a specific artifact exists in CacheStorage with a valid (> 1KB) body.
+ */
+export async function isArtifactCached(
+  repoID: string,
+  path: string,
+): Promise<boolean> {
+  try {
+    const isDirectUrl =
+      path.startsWith("http://") ||
+      path.startsWith("https://") ||
+      repoID.startsWith("http://") ||
+      repoID.startsWith("https://");
+
+    const url = isDirectUrl
+      ? path.startsWith("http://") || path.startsWith("https://")
+        ? path
+        : `${repoID}/${path}`
+      : `https://huggingface.co/${repoID}/resolve/main/${path}`;
+
+    const cacheName = isDirectUrl ? "direct-model-cache" : repoID;
+    const cache = await caches.open(cacheName);
+    const matched = await cache.match(url);
+    if (!matched || !matched.ok) return false;
+    const blob = await matched.blob();
+    return blob.size > 1024;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Download an artifact with streaming progress reporting and store in CacheStorage.
+ */
+export async function fetchAndCacheWithProgress(
+  repoID: string,
+  path: string,
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<void> {
+  const isDirectUrl =
+    path.startsWith("http://") ||
+    path.startsWith("https://") ||
+    repoID.startsWith("http://") ||
+    repoID.startsWith("https://");
+
+  const url = isDirectUrl
+    ? path.startsWith("http://") || path.startsWith("https://")
+      ? path
+      : `${repoID}/${path}`
+    : `https://huggingface.co/${repoID}/resolve/main/${path}`;
+
+  const cacheName = isDirectUrl ? "direct-model-cache" : repoID;
+  const cache = await caches.open(cacheName);
+
+  // If already cached and valid, notify 100% and finish
+  const existing = await cache.match(url);
+  if (existing && existing.ok) {
+    const blob = await existing.blob();
+    if (blob.size > 1024) {
+      if (onProgress) onProgress(blob.size, blob.size);
+      return;
+    }
+    await cache.delete(url);
+  }
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Download failed: HTTP ${res.status} (${res.statusText})`);
+
+  const contentLength = res.headers.get("content-length");
+  const total = contentLength ? parseInt(contentLength, 10) : 0;
+
+  if (!res.body) {
+    const blob = await res.blob();
+    await cache.put(url, new Response(blob, { headers: res.headers }));
+    if (onProgress) onProgress(blob.size, blob.size);
+    return;
+  }
+
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let loaded = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      chunks.push(value);
+      loaded += value.length;
+      if (onProgress) onProgress(loaded, total);
+    }
+  }
+
+  const combined = new Uint8Array(loaded);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.length;
+  }
+
+  const finalResponse = new Response(combined, {
+    status: res.status,
+    statusText: res.statusText,
+    headers: res.headers,
+  });
+
+  await cache.put(url, finalResponse);
 }

@@ -2,6 +2,7 @@ import { fetchAsImageBitmap } from "../utils";
 import { teleaInpaint } from "./telea";
 import {
   buildInkSeed,
+  buildSegmentationSeed,
   dilate,
   maskCount,
   type Mask,
@@ -10,11 +11,13 @@ import { pageNoiseSigma, sobelMagnitude, strongEdgeFloor, toLuma } from "./noise
 import { fitMask, type Route } from "./fit";
 import { renderFill } from "./fill";
 import { renderDenoise } from "./denoise";
+import { renderLama } from "./lama";
 import { regionDeclines } from "./quality";
 import {
   CROP_MARGIN,
   DENOISE_DILATION,
   DENOISE_FEATHER,
+  ISOLATION_RADIUS,
   MAX_MASKED_FRACTION,
 } from "./constants";
 
@@ -23,17 +26,14 @@ import {
  * pixels for one patch covering the mask's bounds, everything outside copied
  * through.
  *
- * Rungs: 0 planar fill, 1 denoise, 2 Telea fast-marching (our model rung is
- * Beta5's LaMa). A rung's output is scored by the ONE decline metric; a
- * declined attempt is rolled back and the region climbs. The automatic pass
- * never starts above rung 2, and a region nothing can clean is left exactly
- * as it was and reported - "declined" means the same thing whichever rung
- * produced it.
+ * Rungs: 0 planar fill, 1 denoise, 2 LaMa redraw (opt-in), 3 Telea fast-marching.
+ * A rung's output is scored by the ONE decline metric; a declined attempt is
+ * rolled back and the region climbs.
  */
 
 export interface InpaintRegionResult {
   index: number;
-  method: "fill" | "denoise" | "telea" | "rect-telea" | "declined" | "skipped";
+  method: "fill" | "denoise" | "lama" | "telea" | "rect-telea" | "declined" | "skipped";
   route: Route | "rect";
   deviation: number;
   thickness: number;
@@ -45,9 +45,15 @@ export interface InpaintAutoResult {
   regions: InpaintRegionResult[];
 }
 
+export interface InpaintAutoOptions {
+  useLama?: boolean;
+  segmentation?: Uint8Array | null;
+}
+
 export async function inpaintImageAuto(
   imageSrc: string,
   bboxes: Bbox[],
+  options?: InpaintAutoOptions,
 ): Promise<InpaintAutoResult> {
   const bitmap = await fetchAsImageBitmap(imageSrc);
   const canvas = document.createElement("canvas");
@@ -112,12 +118,19 @@ export async function inpaintImageAuto(
       }))
       .filter((_, j) => j !== i);
 
-    const seed = buildInkSeed(cropLuma, cw, ch, cx0, cy0, {
+    const seedBox = {
       x1: rx1 - cx0,
       y1: ry1 - cy0,
       x2: rx2 - cx0,
       y2: ry2 - cy0,
-    });
+    };
+    let seed = options?.segmentation
+      ? buildSegmentationSeed(options.segmentation, pw, ph, cw, ch, cx0, cy0, seedBox)
+      : buildInkSeed(cropLuma, cw, ch, cx0, cy0, seedBox);
+
+    if (maskCount(seed) < 3 && options?.segmentation) {
+      seed = buildInkSeed(cropLuma, cw, ch, cx0, cy0, seedBox);
+    }
     const seedCount = maskCount(seed);
 
     const ms = () => Math.round(performance.now() - t0);
@@ -125,7 +138,7 @@ export async function inpaintImageAuto(
     if (seedCount < 3) {
       // No usable ink: legacy rectangle Telea on the bbox, still decline-gated.
       const rect = rectMask(cw, ch, cx0, cy0, rx1, ry1, rx2, ry2);
-      const ok = runRung(
+      const ok = await runRung(
         page,
         rect,
         () => runTelea(page, rect, cropRgb),
@@ -147,7 +160,7 @@ export async function inpaintImageAuto(
     const attempts: {
       method: InpaintRegionResult["method"];
       mask: Mask;
-      render: () => void;
+      render: () => Promise<boolean | void> | void;
     }[] = [];
     const denoiseApplied = dilate(fitted.mask, DENOISE_DILATION + DENOISE_FEATHER);
     const teleaAttempt = {
@@ -155,6 +168,14 @@ export async function inpaintImageAuto(
       mask: fitted.mask,
       render: () => runTelea(page, fitted.mask, cropRgb),
     };
+    const lamaAttempt = options?.useLama
+      ? {
+          method: "lama" as const,
+          mask: dilate(fitted.ink, ISOLATION_RADIUS),
+          render: async () => await renderLama(page, fitted),
+        }
+      : null;
+
     if (fitted.route === "fill") {
       attempts.push(
         {
@@ -168,8 +189,9 @@ export async function inpaintImageAuto(
           render: () =>
             renderDenoise(page, fitted.mask, fitted, noiseSigma),
         },
-        teleaAttempt,
       );
+      if (lamaAttempt) attempts.push(lamaAttempt);
+      attempts.push(teleaAttempt);
     } else if (fitted.route === "denoise") {
       attempts.push(
         {
@@ -178,15 +200,17 @@ export async function inpaintImageAuto(
           render: () =>
             renderDenoise(page, fitted.mask, fitted, noiseSigma),
         },
-        teleaAttempt,
       );
+      if (lamaAttempt) attempts.push(lamaAttempt);
+      attempts.push(teleaAttempt);
     } else {
+      if (lamaAttempt) attempts.push(lamaAttempt);
       attempts.push(teleaAttempt);
     }
 
     let done: InpaintRegionResult["method"] = "declined";
     for (const attempt of attempts) {
-      const ok = runRung(page, attempt.mask, attempt.render, () =>
+      const ok = await runRung(page, attempt.mask, attempt.render, () =>
         regionDeclines(page, attempt.mask, noiseSigma, otherRects),
       );
       if (ok) {
@@ -214,16 +238,20 @@ export async function inpaintImageAuto(
  * on decline restore and report false. (runRung's `declined` callback runs on
  * the POST pixels - the pixels that would ship.)
  */
-function runRung(
+async function runRung(
   page: ImageData,
   mask: Mask,
-  render: () => void,
+  render: () => Promise<boolean | void> | void,
   declined: () => boolean = () => false,
-): boolean {
+): Promise<boolean> {
   const rect = maskWriteRect(page, mask);
   const snapshot = snapshotRect(page, rect);
   try {
-    render();
+    const res = await render();
+    if (res === false) {
+      restoreRect(page, rect, snapshot);
+      return false;
+    }
   } catch {
     restoreRect(page, rect, snapshot);
     return false; // a rung that cannot render the region declines it

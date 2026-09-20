@@ -1,8 +1,11 @@
 import * as ort from "onnxruntime-web/all";
-import { downloadArtifactHF } from "../utils";
+import { downloadArtifactFromUrl, downloadArtifactHF } from "../utils";
 import { scalingImage, restoreBoundingBox, containmentNMS } from "./utils";
 import { refineDetections } from "./boxes";
 import { DefaultConfig } from "../configs";
+import { runRtDetrDetection } from "./rtdetr";
+import { runComicTextDetection } from "./comictext";
+import { clearSegmentation } from "./segmentation";
 
 ort.env.wasm.wasmPaths = browser.runtime.getURL("/");
 
@@ -10,15 +13,41 @@ let session: ort.InferenceSession | null = null;
 let currentModelName: string | null = null;
 let runLock: Promise<void> = Promise.resolve();
 
+async function loadDetectionSession(
+  model: string,
+  autoUpdate: boolean,
+): Promise<ort.InferenceSession> {
+  if (model === "comic-bubble") {
+    return (await downloadArtifactHF(
+      DefaultConfig.rtdetrModelRepo,
+      "detector-v4-s_int8.onnx",
+      autoUpdate,
+    )) as ort.InferenceSession;
+  }
+
+  if (model === "comic-text-detector") {
+    return await downloadArtifactFromUrl(
+      DefaultConfig.comicTextDetectorUrl,
+      "comic-text-detector",
+      autoUpdate,
+    );
+  }
+
+  return (await downloadArtifactHF(
+    DefaultConfig.detectionModelRepo,
+    DefaultConfig.detectionModelPath(model),
+    autoUpdate,
+  )) as ort.InferenceSession;
+}
+
 export async function detectTextBubble(
   imageSrc: string,
   minConfidence: number = DefaultConfig.detectionMinConfidence,
   requestedModel: string = DefaultConfig.detectionModels[0].id,
   autoUpdate: boolean = DefaultConfig.detectionAutoUpdate,
-) {
+): Promise<Bbox[]> {
   if (session && currentModelName !== requestedModel) {
     try {
-      // Free the hardware memory allocated by the previous model
       await session.release();
     } catch (error) {
       console.warn("Failed to cleanly release the previous session:", error);
@@ -27,42 +56,47 @@ export async function detectTextBubble(
   }
 
   if (!session) {
-    session = await downloadArtifactHF(
-      DefaultConfig.detectionModelRepo,
-      DefaultConfig.detectionModelPath(requestedModel),
-      autoUpdate,
-    );
+    session = await loadDetectionSession(requestedModel, autoUpdate);
     currentModelName = requestedModel;
   }
 
-  const { imageData, origWidth, origHeight } = await scalingImage(imageSrc);
-
-  let result!: ReturnType<typeof containmentNMS>;
+  let result: Bbox[] = [];
   runLock = runLock.then(async () => {
-    result = await runDetection(
-      imageData,
-      origWidth,
-      origHeight,
-      minConfidence,
-    );
+    if (!session) throw new Error("Detection session uninitialized");
+
+    if (requestedModel === "comic-bubble") {
+      clearSegmentation();
+      result = await runRtDetrDetection(session, imageSrc, minConfidence);
+    } else if (requestedModel === "comic-text-detector") {
+      result = await runComicTextDetection(session, imageSrc, minConfidence);
+    } else {
+      clearSegmentation();
+      const { imageData, origWidth, origHeight } = await scalingImage(imageSrc);
+      result = await runYoloDetection(
+        session,
+        imageData,
+        origWidth,
+        origHeight,
+        minConfidence,
+      );
+    }
   });
+
   await runLock;
   return result;
 }
 
-async function runDetection(
+async function runYoloDetection(
+  session: ort.InferenceSession,
   imageData: ImageData,
   origWidth: number,
   origHeight: number,
   minConfidence: number,
-) {
-  if (!session) throw new Error("Session not initialized");
-
+): Promise<Bbox[]> {
   const targetSize = imageData.width;
   const channelSize = targetSize * targetSize;
   const imageBuffer = new Float32Array(3 * channelSize);
 
-  // Separate the RGB channels and normalize them to 0.0 - 1.0
   for (let i = 0; i < channelSize; i++) {
     const rgbaIndex = i * 4;
     imageBuffer[i] = imageData.data[rgbaIndex] / 255.0;
@@ -70,7 +104,6 @@ async function runDetection(
     imageBuffer[i + channelSize * 2] = imageData.data[rgbaIndex + 2] / 255.0;
   }
 
-  // Create the tensor and execute the YOLO model
   const inputTensor = new ort.Tensor("float32", imageBuffer, [
     1,
     3,
@@ -83,8 +116,7 @@ async function runDetection(
   const outputName = session.outputNames[0];
   const detections = (await results[outputName].getData()) as Float32Array;
 
-  // Format the detections
-  const formattedDetections = [];
+  const formattedDetections: Bbox[] = [];
 
   for (let i = 0; i < detections.length; i += 6) {
     const x1 = detections[i];
@@ -113,8 +145,5 @@ async function runDetection(
   }
 
   const nms = containmentNMS(formattedDetections);
-  // Region build: deterministic
-  // merges, speckle drop, and the growth tiers - the box the crop/inpaint
-  // works on. Flagged-large boxes stay (they are real text, just big).
   return refineDetections(nms, origWidth, origHeight).boxes;
 }

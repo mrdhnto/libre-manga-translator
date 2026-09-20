@@ -14,10 +14,13 @@ import {
   inpaintImage,
   drawTranslations,
   exportCanvasToJpeg,
+  quickHash,
+  resolveImagePageIndex,
 } from "./utils";
 import "@/assets/app.css";
 
-const srcKey = (src: string) => src.slice(0, 100);
+const srcKey = (src: string) =>
+  src.startsWith("data:") ? quickHash(src) : src;
 
 export default defineContentScript({
   matches: ["<all_urls>"],
@@ -35,6 +38,7 @@ export default defineContentScript({
       { ui: ShadowRootContentScriptUi<any>; wrapper: HTMLElement }
     >();
     let lastRightClickedSrc: string | undefined = undefined;
+    let lastRightClickedImg: HTMLImageElement | undefined = undefined;
     let lastDetectMs: number | undefined = undefined;
 
     // Mount independent sidebar shadow UI
@@ -60,13 +64,14 @@ export default defineContentScript({
         .find((el) => el instanceof HTMLImageElement) as
         | HTMLImageElement
         | undefined;
+      lastRightClickedImg = img;
       lastRightClickedSrc = img && srcKey(img.src);
     });
 
     browser.runtime.onMessage.addListener(async (msg, _, sendResponse) => {
       if (msg.type === "lmt-translate-image") {
         const clicked = msg.data ?? lastRightClickedSrc;
-        const originalSrc = translatedSrcMap.get(clicked) ?? clicked;
+        const originalSrc = (clicked && translatedSrcMap.get(clicked)) ?? clicked;
         if (!originalSrc) return;
 
         // If overlay already exists, bring it back to refine mode
@@ -85,9 +90,18 @@ export default defineContentScript({
           }
         }
 
-        const imgElement = document.querySelector<HTMLImageElement>(
-          `img[src="${originalSrc.replace(/"/g, '\\"')}"]`,
-        );
+        // Direct reference to right-clicked element; fallback to querySelector
+        let imgElement = lastRightClickedImg;
+        if (
+          !imgElement ||
+          !document.body.contains(imgElement) ||
+          (clicked && imgElement.src !== clicked && srcKey(imgElement.src) !== clicked)
+        ) {
+          imgElement =
+            document.querySelector<HTMLImageElement>(
+              `img[src="${originalSrc.replace(/"/g, '\\"')}"]`,
+            ) ?? undefined;
+        }
         if (!imgElement) return;
 
         // Use base64 when offscreen fetch would fail:
@@ -119,7 +133,16 @@ export default defineContentScript({
 
         const translationKey = async () => {
           const { seriesName, chapterId, pageIndex } = await getSiteRule();
-          return `page-cache-${await storage.getItem<string>("sync:target-lang") ?? DefaultConfig.targetLang}-${seriesName}-${chapterId}-${pageIndex}`;
+          const resolvedPage = resolveImagePageIndex(
+            imgElement,
+            originalSrc,
+            pageIndex,
+          );
+          const targetLang =
+            (await storage.getItem<string>("sync:target-lang")) ??
+            DefaultConfig.targetLang;
+          const imgHash = quickHash(originalSrc);
+          return `page-cache-${targetLang}-${seriesName}-${chapterId}-p${resolvedPage}-${imgHash}`;
         };
 
         const rect = imgElement.getBoundingClientRect();
@@ -199,6 +222,11 @@ export default defineContentScript({
                   const t0 = performance.now();
                   const { seriesName, chapterId, pageIndex } =
                     await getSiteRule();
+                  const resolvedPage = resolveImagePageIndex(
+                    imgElement,
+                    originalSrc,
+                    pageIndex,
+                  );
                   const shareData =
                     await storage.getItem<boolean>("sync:share-data");
 
@@ -206,7 +234,7 @@ export default defineContentScript({
                     sendBboxDataToTelemetry(
                       seriesName,
                       chapterId,
-                      pageIndex,
+                      resolvedPage,
                       // strip local-only fields (gateSkip) from the payload
                       bboxes.map((b) => ({
                         x1: b.x1,
@@ -227,7 +255,7 @@ export default defineContentScript({
                     const isContinuous =
                       seriesContext.lastChapterId === chapterId &&
                       seriesContext.lastPageIndex !== null &&
-                      pageIndex === seriesContext.lastPageIndex + 1;
+                      resolvedPage === seriesContext.lastPageIndex + 1;
 
                     // If they jumped chapters or skipped pages, wipe the history in memory
                     if (!isContinuous) {
@@ -273,6 +301,9 @@ export default defineContentScript({
                       ocrMinConfidence: await storage.getItem<number>(
                         "sync:ocr-min-confidence",
                       ),
+                      ocrEngine:
+                        (await storage.getItem<string>("sync:ocr-engine")) ??
+                        DefaultConfig.ocrEngine,
                       llmModel: await storage.getItem<string>("sync:llm-model"),
                       llmTemperature: await storage.getItem<number>(
                         "sync:llm-temperature",
@@ -389,7 +420,7 @@ export default defineContentScript({
                     seriesContext,
                     seriesName,
                     chapterId,
-                    pageIndex,
+                    resolvedPage,
                     translations,
                     context,
                   );
@@ -431,6 +462,14 @@ export default defineContentScript({
                     inpaintedSrcCache.set(src, cached);
                     inpaintMethod = res.method;
 
+                    if (res.regions) {
+                      res.regions.forEach((r, idx) => {
+                        if (r.method === "declined" && paintable[idx]) {
+                          paintable[idx].inpaintDeclined = true;
+                        }
+                      });
+                    }
+
                     const inpaintStats = res.regions
                       ? {
                           fill: res.regions.filter(
@@ -438,6 +477,9 @@ export default defineContentScript({
                           ).length,
                           denoise: res.regions.filter(
                             (r) => r.method === "denoise",
+                          ).length,
+                          lama: res.regions.filter(
+                            (r) => r.method === "lama",
                           ).length,
                           telea: res.regions.filter(
                             (r) => r.method === "telea",

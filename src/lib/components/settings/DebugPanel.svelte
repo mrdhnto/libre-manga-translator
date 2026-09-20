@@ -270,10 +270,13 @@
               {#if log.inpaintStats}
                 <div
                   class="col-span-2 text-[10px] font-mono text-zinc-500"
-                  title="fill · denoise · telea · rect-telea · declined · skipped"
+                  title="fill · denoise · lama · telea · rect-telea · declined · skipped"
                 >
                   {log.inpaintStats.fill} fill ·
                   {log.inpaintStats.denoise} denoise ·
+                  {#if (log.inpaintStats as any).lama}
+                    {(log.inpaintStats as any).lama} lama ·
+                  {/if}
                   {log.inpaintStats.telea} telea ·
                   {log.inpaintStats.rectTelea} rect
                   {#if log.inpaintStats.declined}

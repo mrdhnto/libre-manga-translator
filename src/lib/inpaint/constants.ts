@@ -76,3 +76,21 @@ export const CROP_MARGIN =
 
 /** Degenerate guard reused from telea: skip a crop whose mask covers >80%. */
 export const MAX_MASKED_FRACTION = 0.8;
+
+/** Model input resolution for LaMa inpainter. */
+export const MODEL_INPUT = 512;
+
+/** Tiling overlap between consecutive 512x512 crops, px. */
+export const TILE_OVERLAP = 128;
+
+/** Stride between consecutive tiles (MODEL_INPUT - TILE_OVERLAP). */
+export const TILE_STRIDE = MODEL_INPUT - TILE_OVERLAP;
+
+/** Amount of overlap committed before handoff (TILE_OVERLAP / 2). */
+export const TILE_HANDOFF = TILE_OVERLAP / 2;
+
+/** Max box size in either dimension before model rung declines (4 * MODEL_INPUT). */
+export const MAX_BOX = 4 * MODEL_INPUT;
+
+/** Hard feather width inside isolation margin for model rung blending. */
+export const ISOLATION_FEATHER = 2;

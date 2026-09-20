@@ -233,6 +233,184 @@ export default defineBackground(() => {
       return true;
     }
 
+    // Enumerate all downloaded models (CacheStorage + WebLLM)
+    if (msg.type === "LIST_CACHED_MODELS") {
+      const task = async () => {
+        const results: {
+          id: string;
+          name: string;
+          category: "LLM" | "Detection" | "OCR" | "Inpaint" | "Script Gate" | "Other";
+          size: number;
+          cacheName: string;
+          url: string;
+          isLlm: boolean;
+        }[] = [];
+
+        // 1. Enumerate CacheStorage entries
+        try {
+          const cacheNames = await caches.keys();
+          for (const cacheName of cacheNames) {
+            const cache = await caches.open(cacheName);
+            const requests = await cache.keys();
+            for (const req of requests) {
+              const url = req.url;
+              let size = 0;
+              try {
+                const resp = await cache.match(req);
+                if (!resp || !resp.ok) {
+                  await cache.delete(req).catch(() => {});
+                  continue;
+                }
+                const blob = await resp.blob();
+                size = blob?.size ?? 0;
+              } catch {
+                await cache.delete(req).catch(() => {});
+                continue;
+              }
+
+              // Filter out 0-byte or aborted entries (< 1 KB is never a valid model weight)
+              if (size <= 1024) {
+                await cache.delete(req).catch(() => {});
+                continue;
+              }
+
+              let category: "Detection" | "OCR" | "Inpaint" | "Script Gate" | "Other" = "Other";
+              let name = url.split("/").pop() ?? url;
+
+              if (url.includes("lama-manga") || cacheName.includes("lama-manga")) {
+                category = "Inpaint";
+                name = "LaMa Redraw Model (lama-manga.onnx)";
+              } else if (url.includes("comictextdetector")) {
+                category = "Detection";
+                name = "ComicTextDetector (comictextdetector.pt.onnx)";
+              } else if (url.includes("comic-text-and-bubble") || url.includes("detector-v4")) {
+                category = "Detection";
+                name = "RT-DETR Bubble Detector (detector-v4-s_int8.onnx)";
+              } else if (url.includes("Manga-Bubble-YOLO") || url.includes("onnx/yolo")) {
+                category = "Detection";
+                name = url.includes("yolo26s") ? "YOLO26-Small" : "YOLO26-Nano";
+              } else if (url.includes("manga-ocr") || cacheName.includes("manga-ocr")) {
+                category = "OCR";
+                name = `Manga-OCR (${url.split("/").pop()})`;
+              } else if (url.includes("paddleocr") || url.includes("languages/")) {
+                category = "OCR";
+                name = `PaddleOCR (${url.split("/").pop()})`;
+              } else if (url.includes("osd_lstm") || url.includes("osd_labels")) {
+                category = "Script Gate";
+                name = `Script Gate (${url.split("/").pop()})`;
+              }
+
+              results.push({
+                id: `${cacheName}::${url}`,
+                name,
+                category,
+                size,
+                cacheName,
+                url,
+                isLlm: false,
+              });
+            }
+
+            const remaining = await cache.keys();
+            if (remaining.length === 0) {
+              await caches.delete(cacheName).catch(() => {});
+            }
+          }
+        } catch (e) {
+          console.warn("Failed to enumerate CacheStorage:", e);
+        }
+
+        // 2. Enumerate WebLLM cached models from local storage
+        try {
+          const items = await storage.getItems(["local:cached-llms"]);
+          const cachedLlms = (items[0]?.value as string[]) || [];
+          for (const modelId of cachedLlms) {
+            const foundDef = DefaultConfig.llmModels.find((m) => m.id === modelId);
+            results.push({
+              id: `llm::${modelId}`,
+              name: foundDef ? `${foundDef.label} (${modelId})` : modelId,
+              category: "LLM",
+              size: modelId.includes("4B") ? 3.4 * 1024 * 1024 * 1024 : 5.7 * 1024 * 1024 * 1024,
+              cacheName: "webllm",
+              url: modelId,
+              isLlm: true,
+            });
+          }
+        } catch (e) {
+          console.warn("Failed to enumerate WebLLM cached models:", e);
+        }
+
+        return results;
+      };
+
+      keepAliveWhile(task().then(respond).catch(respondErr));
+      return true;
+    }
+
+    // Delete a single cached model or file
+    if (msg.type === "DELETE_CACHED_MODEL") {
+      const task = async () => {
+        const { isLlm, modelId, cacheName, url } = msg.data;
+        if (isLlm && modelId) {
+          await ensureOffscreen();
+          await browser.runtime.sendMessage({
+            type: "OFFSCREEN_DELETE_LLM_CACHE",
+            data: { modelId },
+          });
+          const items = await storage.getItems(["local:cached-llms"]);
+          const cached = (items[0]?.value as string[]) || [];
+          await storage.setItem(
+            "local:cached-llms",
+            cached.filter((m) => m !== modelId),
+          );
+          return { success: true };
+        }
+
+        if (cacheName && url) {
+          const cache = await caches.open(cacheName);
+          await cache.delete(url);
+          const remaining = await cache.keys();
+          if (remaining.length === 0) {
+            await caches.delete(cacheName);
+          }
+          return { success: true };
+        }
+
+        throw new Error("Invalid delete request payload");
+      };
+
+      keepAliveWhile(task().then(respond).catch(respondErr));
+      return true;
+    }
+
+    // Clear all cached models (CacheStorage + WebLLM)
+    if (msg.type === "CLEAR_ALL_CACHED_MODELS") {
+      const task = async () => {
+        const cacheNames = await caches.keys();
+        for (const name of cacheNames) {
+          await caches.delete(name).catch(() => {});
+        }
+
+        const items = await storage.getItems(["local:cached-llms"]);
+        const cachedLlms = (items[0]?.value as string[]) || [];
+        if (cachedLlms.length > 0) {
+          await ensureOffscreen().catch(() => {});
+          for (const modelId of cachedLlms) {
+            await browser.runtime.sendMessage({
+              type: "OFFSCREEN_DELETE_LLM_CACHE",
+              data: { modelId },
+            }).catch(() => {});
+          }
+          await storage.setItem("local:cached-llms", []);
+        }
+
+        return { success: true };
+      };
+
+      keepAliveWhile(task().then(respond).catch(respondErr));
+      return true;
+    }
+
     // Delete a cached WebLLM model to free disk space
     if (msg.type === "DELETE_LLM_CACHE") {
       const forward = () =>
@@ -284,29 +462,44 @@ export default defineBackground(() => {
     if (msg.type === "PREFETCH_MODEL") {
       const { type, data } = msg.data;
 
-      const task =
-        type === "detection"
-          ? downloadArtifactHF(
-              DefaultConfig.detectionModelRepo,
-              DefaultConfig.detectionModelPath(data),
+      const runPrefetch = async () => {
+        if (type === "inpaint") {
+          await downloadArtifactHF(
+            DefaultConfig.lamaRepo,
+            DefaultConfig.lamaModelPath,
+            false,
+            true,
+          );
+        } else if (type === "ocr") {
+          if (data === "manga-ocr") {
+            await Promise.all([
+              downloadArtifactHF(DefaultConfig.mangaOcrRepo, "encoder_model.onnx", false, true),
+              downloadArtifactHF(DefaultConfig.mangaOcrRepo, "decoder_model.onnx", false, true),
+              downloadArtifactHF(DefaultConfig.mangaOcrRepo, "vocab.txt", false, true),
+            ]);
+          } else {
+            const lang = data && data !== "paddle" ? data : "chinese";
+            await downloadArtifactHF(DefaultConfig.ocrRepo, DefaultConfig.ocrModelPath(lang), false, true);
+            await downloadArtifactHF(DefaultConfig.ocrRepo, DefaultConfig.ocrDictPath(lang), false, true);
+          }
+        } else if (type === "detection") {
+          if (data === "comic-bubble") {
+            await downloadArtifactHF(DefaultConfig.rtdetrModelRepo, "detector-v4-s_int8.onnx", false, true);
+          } else if (data === "comic-text-detector") {
+            await downloadArtifactHF(
+              "direct-model-cache",
+              DefaultConfig.comicTextDetectorUrl,
               false,
               true,
-            )
-          : downloadArtifactHF(
-              DefaultConfig.ocrRepo,
-              DefaultConfig.ocrModelPath(data),
-              false,
-              true,
-            ).then(() =>
-              downloadArtifactHF(
-                DefaultConfig.ocrRepo,
-                DefaultConfig.ocrDictPath(data),
-                false,
-                true,
-              ),
             );
+          } else {
+            await downloadArtifactHF(DefaultConfig.detectionModelRepo, DefaultConfig.detectionModelPath(data), false, true);
+          }
+        }
+        return { success: true };
+      };
 
-      keepAliveWhile(task.then(() => respond({ success: true })).catch(respondErr));
+      keepAliveWhile(runPrefetch().then(respond).catch(respondErr));
 
       return true;
     }

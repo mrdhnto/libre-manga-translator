@@ -13,6 +13,7 @@
     Search,
     ArrowRightLeft,
     LoaderCircle,
+    HardDrive,
   } from "lucide-svelte";
   import { DefaultConfig } from "@/lib/configs";
   import DetectionSettings from "./settings/DetectionSettings.svelte";
@@ -22,6 +23,7 @@
   import SiteRulesSettings from "./settings/SiteRulesSettings.svelte";
   import DebugPanel from "./settings/DebugPanel.svelte";
   import InpaintSettings from "./settings/InpaintSettings.svelte";
+  import ModelStorageSettings from "./settings/ModelStorageSettings.svelte";
   import { getSiteRule } from "@/lib/adapters";
 
   let isOpen = $state(false);
@@ -48,6 +50,8 @@
   let cachedLlms = $state<string[]>([]);
   let textFont = $state(DefaultConfig.bundleFonts[0].id);
   let inpaintMethod = $state(DefaultConfig.inpaintMethod);
+  let inpaintLama = $state(DefaultConfig.inpaintLama);
+  let ocrEngine = $state(DefaultConfig.ocrEngine);
   let customFonts = $state<{ name: string; dataUrl: string }[]>([]);
   let customRules = $state<SiteRule[]>([]);
   let seriesContext = $state<SeriesContext>({
@@ -73,6 +77,7 @@
     { id: "detection", label: "Detection", icon: Sliders },
     { id: "appearance", label: "Appearance", icon: Type },
     { id: "content", label: "Content", icon: BookOpen },
+    { id: "models", label: "Models", icon: HardDrive },
     { id: "debug", label: "Debug", icon: Bug },
   ];
 
@@ -165,6 +170,8 @@
         "local:server-api-key",
         "sync:custom-site-rules",
         "sync:inpaint-method",
+        "sync:inpaint-lama",
+        "sync:ocr-engine",
         "sync:script-gate",
         "local:cached-llms",
       ]);
@@ -178,6 +185,7 @@
       geminiModel = saved["sync:gemini-model"] ?? geminiModel;
       detectionModel = saved["sync:detection-model"] ?? detectionModel;
       ocrMinConfidence = saved["sync:ocr-min-confidence"] ?? ocrMinConfidence;
+      ocrEngine = saved["sync:ocr-engine"] ?? ocrEngine;
       currentMode = saved["sync:current-mode"] ?? currentMode;
       sourceLang = saved["sync:source-lang"] ?? sourceLang;
       targetLang = saved["sync:target-lang"] ?? targetLang;
@@ -192,6 +200,7 @@
       serverApiKey = saved["local:server-api-key"] ?? serverApiKey;
       customRules = saved["sync:custom-site-rules"] ?? customRules;
       inpaintMethod = saved["sync:inpaint-method"] ?? inpaintMethod;
+      inpaintLama = saved["sync:inpaint-lama"] ?? inpaintLama;
       scriptGate = saved["sync:script-gate"] ?? scriptGate;
       cachedLlms = Array.isArray(saved["local:cached-llms"]) ? saved["local:cached-llms"] : [];
 
@@ -228,6 +237,8 @@
         { key: "local:server-api-key", value: serverApiKey },
         { key: "sync:custom-site-rules", value: $state.snapshot(customRules) },
         { key: "sync:inpaint-method", value: inpaintMethod },
+        { key: "sync:inpaint-lama", value: inpaintLama },
+        { key: "sync:ocr-engine", value: ocrEngine },
         { key: "sync:script-gate", value: scriptGate },
       ]);
     }, 150);
@@ -301,8 +312,15 @@
 
   <!-- Panel -->
   <div
+    role="presentation"
     class="fixed top-0 right-0 bottom-0 w-84 max-w-[90vw] bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 shadow-2xl z-99999 flex flex-col font-sans border-l border-zinc-200 dark:border-zinc-800 pointer-events-auto"
     transition:fly={{ x: 340, duration: 250 }}
+    onkeydown={(e) => e.stopPropagation()}
+    onkeyup={(e) => e.stopPropagation()}
+    onkeypress={(e) => e.stopPropagation()}
+    onmousedown={(e) => e.stopPropagation()}
+    onpointerdown={(e) => e.stopPropagation()}
+    onwheel={(e) => e.stopPropagation()}
   >
     <!-- Header -->
     <div class="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 shrink-0">
@@ -462,7 +480,7 @@
               <p class="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">
                 OCR Threshold
               </p>
-              <OcrSettings bind:ocrMinConfidence bind:scriptGate />
+              <OcrSettings bind:ocrMinConfidence bind:scriptGate bind:ocrEngine />
             </div>
           </div>
         {/if}
@@ -480,7 +498,7 @@
         {#if activeSection === "appearance"}
           <div class="space-y-3">
             <TypographySettings bind:textFont bind:customFonts />
-            <InpaintSettings bind:inpaintMethod />
+            <InpaintSettings bind:inpaintMethod bind:inpaintLama />
           </div>
         {/if}
 
@@ -561,6 +579,11 @@
               />
             </div>
           </div>
+        {/if}
+
+        <!-- ── MODELS & STORAGE ── -->
+        {#if activeSection === "models"}
+          <ModelStorageSettings />
         {/if}
 
         <!-- ── DEBUG ── -->

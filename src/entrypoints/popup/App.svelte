@@ -67,6 +67,8 @@
   let saveTimer: ReturnType<typeof setTimeout>;
   let textFont = $state(DefaultConfig.bundleFonts[0].id);
   let inpaintMethod = $state(DefaultConfig.inpaintMethod);
+  let inpaintLama = $state(DefaultConfig.inpaintLama);
+  let ocrEngine = $state(DefaultConfig.ocrEngine);
   let customFonts = $state<{ name: string; dataUrl: string }[]>([]);
   let latestVersion = $state<{
     currentVersion: string;
@@ -228,6 +230,8 @@
       "local:server-api-key",
       "sync:custom-site-rules",
       "sync:inpaint-method",
+      "sync:inpaint-lama",
+      "sync:ocr-engine",
       "sync:script-gate",
     ]);
 
@@ -242,6 +246,7 @@
     geminiModel = saved["sync:gemini-model"] ?? geminiModel;
     detectionModel = saved["sync:detection-model"] ?? detectionModel;
     ocrMinConfidence = saved["sync:ocr-min-confidence"] ?? ocrMinConfidence;
+    ocrEngine = saved["sync:ocr-engine"] ?? ocrEngine;
     scriptGate = saved["sync:script-gate"] ?? scriptGate;
     currentMode = saved["sync:current-mode"] ?? currentMode;
     sourceLang = saved["sync:source-lang"] ?? sourceLang;
@@ -265,6 +270,7 @@
       ? saved["sync:custom-site-rules"]
       : [];
     inpaintMethod = saved["sync:inpaint-method"] ?? inpaintMethod;
+    inpaintLama = saved["sync:inpaint-lama"] ?? inpaintLama;
     const storedCtx = saved[`sync:context-${seriesName}`];
     if (storedCtx) {
       seriesContext = {
@@ -308,6 +314,8 @@
         { key: "local:server-api-key", value: serverApiKey },
         { key: "sync:custom-site-rules", value: $state.snapshot(customRules) },
         { key: "sync:inpaint-method", value: inpaintMethod },
+        { key: "sync:inpaint-lama", value: inpaintLama },
+        { key: "sync:ocr-engine", value: ocrEngine },
       ]);
     }, 150);
   }
@@ -319,6 +327,7 @@
       detectionAutoUpdate,
       detectionMinConfidence,
       ocrMinConfidence,
+      ocrEngine,
       scriptGate,
       geminiKey,
       geminiModel,
@@ -332,6 +341,7 @@
       textFont,
       customFonts.length,
       inpaintMethod,
+      inpaintLama,
       llmModel,
       llmTemperature,
       serverHost,
@@ -774,7 +784,7 @@
                 {isFetchingDetection}
               />
 
-              <OcrSettings bind:ocrMinConfidence bind:scriptGate />
+              <OcrSettings bind:ocrMinConfidence bind:scriptGate bind:ocrEngine />
 
               <div>
                 <span class="text-sm font-bold uppercase tracking-widest text-zinc-500 ml-1">
@@ -799,7 +809,7 @@
 
               <TypographySettings bind:textFont bind:customFonts />
 
-              <InpaintSettings bind:inpaintMethod />
+              <InpaintSettings bind:inpaintMethod bind:inpaintLama />
 
               <SiteRulesSettings
                 bind:customRules

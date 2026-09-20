@@ -56,8 +56,6 @@
     onBackToRefine?: () => void;
   }
 
-  const PADDING_PX = 10;
-
   let {
     targetImageRect,
     scaleX,
@@ -286,6 +284,11 @@ function applyBboxesSort() {
     }
     bboxes[i].gateSkip = undefined;
     translations = translations.map((t, k) => (k === i ? text : t));
+    if (result.sourceTexts?.[0]) {
+      sourceTexts = sourceTexts.map((s, k) =>
+        k === i ? result.sourceTexts![0] : s,
+      );
+    }
     try {
       translatedUrl = await renderTranslations(
         $state.snapshot(translations),
@@ -338,13 +341,20 @@ function applyBboxesSort() {
   }
 
   function addBox() {
+    const natW = targetImageRect.width / (scaleX || 1);
+    const natH = targetImageRect.height / (scaleY || 1);
+    const boxW = Math.min(200, natW * 0.4);
+    const boxH = Math.min(200, natH * 0.2);
+    const startX = (natW - boxW) / 2;
+    const startY = (natH - boxH) / 2;
+
     bboxes = [
       ...bboxes,
       {
-        x1: targetImageRect.left,
-        y1: targetImageRect.top,
-        x2: 0.5 * targetImageRect.width + targetImageRect.left,
-        y2: 0.5 * targetImageRect.height + targetImageRect.top,
+        x1: startX,
+        y1: startY,
+        x2: startX + boxW,
+        y2: startY + boxH,
         confidence: 1,
       },
     ];
@@ -379,6 +389,13 @@ function applyBboxesSort() {
     e.stopPropagation();
   }
 
+  // Keyboard events: stop all keyboard propagation so web manga readers
+  // (e.g. MangaFire, Comix) do not intercept typing or overlay shortcuts
+  // (such as 'h' for help dialog, 'a'/'d' for chapter flips, 'w'/'s' for scroll).
+  function isolateHostKeyboard(e: KeyboardEvent) {
+    e.stopPropagation();
+  }
+
   // Click needs preventDefault too: some readers wrap the img
   // in a native <a href="next-page">, and our overlay mounts inside that
   // anchor. stopPropagation alone does NOT cancel native link navigation -
@@ -407,16 +424,15 @@ function applyBboxesSort() {
       showError("No text bubbles detected - add boxes manually");
     }
 
-    // Pad boxes and filter out invalid/phantom boxes (NaN coords, zero or negative area)
+    // Filter out invalid/phantom boxes (NaN coords, zero or negative area)
     // so user is never stuck with unclickable invisible boxes.
+    // NOTE: Auto-padding (+10px) was removed as detection region-build (+7/+8px)
+    // and inpaint/ocr pipelines already add sufficient internal margins.
+    // If you need to restore padding per-box, use:
+    //   x1: Math.max(0, box.x1 - 4), y1: Math.max(0, box.y1 - 4),
+    //   x2: box.x2 + 4, y2: box.y2 + 4
+    // Adjust the constant as needed; original was +10px.
     bboxes = rawBboxes
-      .map((box) => ({
-        ...box,
-        x1: Math.max(0, box.x1 - PADDING_PX),
-        y1: Math.max(0, box.y1 - PADDING_PX),
-        x2: box.x2 + PADDING_PX,
-        y2: box.y2 + PADDING_PX,
-      }))
       .filter(
         (b) =>
           Number.isFinite(b.x1) &&
@@ -433,6 +449,75 @@ function applyBboxesSort() {
     translations = initialCache?.translations ?? [];
     sourceTexts = initialCache?.sourceTexts ?? [];
   });
+
+  const handleKeyDown = (e: KeyboardEvent) => {
+    // Use composedPath() to inspect the actual target across Shadow DOM boundaries
+    const target = (e.composedPath?.()[0] || e.target) as HTMLElement | null;
+    const isEditing =
+      target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT");
+
+    if (isEditing) {
+      // If user hits Escape while typing, close the edit panel
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        e.preventDefault();
+        if (showEditPanel) showEditPanel = false;
+        return;
+      }
+      // Never hijack or preventDefault typing inside edit panel textareas,
+      // but always stop propagation so host reader shortcuts (e.g. 'h', 'a'/'d', 'w'/'s') never fire
+      e.stopPropagation();
+      return;
+    }
+
+    // If user hits Escape, close the edit panel first, else deselect the box
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      e.preventDefault();
+      if (showEditPanel) showEditPanel = false;
+      else activeIndex = null;
+      return;
+    }
+
+    // Box editing shortcuts only apply in refining mode
+    if (mode !== "refining") {
+      e.stopPropagation();
+      return;
+    }
+
+    // Delete active box if user hits Delete or Backspace
+    if (
+      (e.key === "Delete" || e.key === "Backspace") &&
+      activeIndex !== null
+    ) {
+      e.stopPropagation();
+      e.preventDefault();
+      deleteActiveBox();
+      return;
+    }
+
+    // Undo if user click ctrl + z
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+      e.stopPropagation();
+      e.preventDefault();
+      // redo if the shift key being push
+      if (e.shiftKey) redo();
+      else undo();
+      return;
+    }
+
+    // Undo if user click ctrl + y
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+      e.stopPropagation();
+      e.preventDefault();
+      redo();
+      return;
+    }
+
+    // Stop any other keydown on the overlay from bubbling to the reader
+    e.stopPropagation();
+    e.preventDefault();
+  };
 
   $effect(() => {
     const handleClick = (event: MouseEvent) => {
@@ -451,41 +536,6 @@ function applyBboxesSort() {
       activeIndex = null;
       event.stopPropagation();
       event.preventDefault();
-    };
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Never hijack typing inside the edit panel textareas
-      const target = e.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === "TEXTAREA" || target.tagName === "INPUT")
-      )
-        return;
-
-      e.preventDefault();
-
-      // If user hits Escape, close the edit panel first, else deselect the box
-      if (e.key === "Escape") {
-        if (showEditPanel) showEditPanel = false;
-        else activeIndex = null;
-      }
-      // Delete active box if user hits Delete or Backspace
-      if (
-        (e.key === "Delete" || e.key === "Backspace") &&
-        activeIndex !== null
-      ) {
-        deleteActiveBox();
-      }
-
-      // Undo if user click ctrl + z
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
-        // redo if the shift key being push
-        if (e.shiftKey) redo();
-        else undo();
-      }
-
-      // Undo if user click ctrl + y
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") redo();
     };
 
     const handleMouseMove = (e: MouseEvent) => {
@@ -559,12 +609,16 @@ function applyBboxesSort() {
     if (mode === "refining")
       window.addEventListener("click", handleClick, { capture: true });
     window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", isolateHostKeyboard);
+    window.addEventListener("keypress", isolateHostKeyboard);
     wrapper.addEventListener("lmt:back-to-refine", handleBackToRefine);
 
     return () => {
       if (mode === "refining")
         window.removeEventListener("click", handleClick, { capture: true });
       window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", isolateHostKeyboard);
+      window.removeEventListener("keypress", isolateHostKeyboard);
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
       window.removeEventListener("lmt:back-to-refine", handleBackToRefine);
@@ -598,7 +652,8 @@ function applyBboxesSort() {
 <div
     id="lmt-overlay"
     role="presentation"
-    class="absolute top-0 left-0 overflow-hidden pointer-events-auto group z-50 w-full h-full"
+    tabindex="-1"
+    class="absolute top-0 left-0 overflow-hidden pointer-events-auto group z-50 w-full h-full outline-none"
     onmousedown={isolateHostEvents}
     onpointerdown={isolateHostEvents}
     onpointerup={isolateHostEvents}
@@ -608,6 +663,10 @@ function applyBboxesSort() {
     oncontextmenu={isolateHostEvents}
     ondblclick={isolateHostEvents}
     ondragstart={isolateHostEvents}
+    onwheel={isolateHostEvents}
+    onkeydown={handleKeyDown}
+    onkeyup={isolateHostKeyboard}
+    onkeypress={isolateHostKeyboard}
     onclickcapture={(e) => e.preventDefault()}
     onclick={isolateHostClick}
   >
@@ -831,6 +890,23 @@ function applyBboxesSort() {
             </button>
           </div>
         {/if}
+        {#if box.inpaintDeclined && !box.gateSkip}
+          <div
+            class="absolute border-2 border-dotted border-rose-500/80 rounded-sm pointer-events-none z-30"
+            style:left="{box.x1 * scaleX}px"
+            style:top="{box.y1 * scaleY}px"
+            style:width="{(box.x2 - box.x1) * scaleX}px"
+            style:height="{(box.y2 - box.y1) * scaleY}px"
+            title="Inpainting declined: background could not be cleaned cleanly. Original paper retained."
+          >
+            <div
+              class="pointer-events-auto absolute -top-4 right-0 bg-rose-500/90 text-white text-[9px] font-mono px-1 rounded shadow"
+              title="Inpainting declined: all ladder rungs failed quality checks"
+            >
+              Declined
+            </div>
+          </div>
+        {/if}
       {/each}
     {/if}
     <!-- Floating action cluster beside the image -->
@@ -888,12 +964,17 @@ function applyBboxesSort() {
     <div
       class="absolute inset-0 z-80 bg-black/50 flex items-center justify-center p-10"
       onclick={(e) => e.stopPropagation()}
+      onkeydown={handleKeyDown}
+      onkeyup={isolateHostKeyboard}
+      onkeypress={isolateHostKeyboard}
       role="presentation"
     >
       <div
         class="bg-white rounded-xl shadow-xl w-full max-w-md max-h-full flex flex-col overflow-hidden"
         onclick={(e) => e.stopPropagation()}
-        onkeydown={(e) => e.stopPropagation()}
+        onkeydown={handleKeyDown}
+        onkeyup={isolateHostKeyboard}
+        onkeypress={isolateHostKeyboard}
         role="presentation"
       >
         <div class="flex items-center justify-between px-4 py-3 border-b shrink-0">
@@ -918,7 +999,7 @@ function applyBboxesSort() {
                     {i + 1}
                   </span>
                   <span class="text-gray-400 truncate max-w-[260px]"
-                    >{sourceTexts[i] ?? "N/A"}</span
+                    >{sourceTexts[i] || "N/A"}</span
                   >
                 </span>
               </label>
