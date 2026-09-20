@@ -32,7 +32,7 @@
   let currentMode = $state(DefaultConfig.currentMode);
   let sourceLang = $state(DefaultConfig.sourceLang);
   let targetLang = $state(DefaultConfig.targetLang);
-  let shareData = $state(true);
+  let shareData = $state(false);
   let detectionModel = $state(DefaultConfig.detectionModels[0].id);
   let detectionMinConfidence = $state(0.5);
   let detectionAutoUpdate = $state(true);
