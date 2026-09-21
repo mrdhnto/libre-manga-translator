@@ -11,8 +11,20 @@ import {
 } from "./utils";
 import { downloadArtifactHF } from "../utils";
 import { DefaultConfig } from "../configs";
+import { env } from "../env";
 import type { OcrEngine, SingleOcrResult } from "./types";
 import type { GateReason } from "../gate";
+
+export interface PaddleEngineOptions {
+  id?: string;
+  label?: string;
+  /** Defaults to the per-language PaddleOCR repo. */
+  repo?: string;
+  /** Defaults to the per-group `languages/<group>/rec.onnx`. A fixed file ignores the group. */
+  modelPath?: (langGroup: string) => `${string}.onnx`;
+  /** Extension-local dict asset (e.g. bundled PP-OCRv6 dict) — skips the HF dict fetch. */
+  bundledDictPath?: string;
+}
 
 export class PaddleOcrEngine implements OcrEngine {
   id = "paddle";
@@ -22,6 +34,11 @@ export class PaddleOcrEngine implements OcrEngine {
   private charset: string[] | null = null;
   private currentLangGroup: string | null = null;
   private runLock: Promise<void> = Promise.resolve();
+
+  constructor(private opts: PaddleEngineOptions = {}) {
+    if (opts.id) this.id = opts.id;
+    if (opts.label) this.label = opts.label;
+  }
 
   async release(): Promise<void> {
     if (this.session) {
@@ -55,32 +72,37 @@ export class PaddleOcrEngine implements OcrEngine {
     const batchSize = options?.batchSize ?? DefaultConfig.ocrBatchSize;
     const recImgHeight = options?.recImgHeight ?? DefaultConfig.ocrRecImgHeight;
     const langGroup = options?.langGroup ?? "latin";
+    const repo = this.opts.repo ?? DefaultConfig.ocrRepo;
+    const modelFile = (this.opts.modelPath ?? DefaultConfig.ocrModelPath)(langGroup);
+    // Key on the resolved file: per-group packs swap, a fixed-file engine
+    // (PP-OCRv6 manga) keeps its session across language changes.
+    const key = `${repo}:${modelFile}`;
 
-    if (this.session && this.currentLangGroup !== langGroup) {
-      console.info(
-        `[ocr] swapping rec model: ${this.currentLangGroup} → ${langGroup}`,
-      );
+    if (this.session && this.currentLangGroup !== key) {
+      console.info(`[ocr] swapping rec model: ${this.currentLangGroup} → ${key}`);
       await this.release();
     }
 
     if (!this.session) {
-      const modelPath = DefaultConfig.ocrModelPath(langGroup);
-      console.info(`[ocr] loading rec model: ${DefaultConfig.ocrRepo}/${modelPath}`);
-      this.session = await downloadArtifactHF(
-        DefaultConfig.ocrRepo,
-        modelPath,
-        autoUpdate,
-      );
-      this.currentLangGroup = langGroup;
+      console.info(`[ocr] loading rec model: ${repo}/${modelFile}`);
+      this.session = await downloadArtifactHF(repo, modelFile, autoUpdate);
+      this.currentLangGroup = key;
     }
 
     if (!this.charset) {
-      const dictResp = await downloadArtifactHF(
-        DefaultConfig.ocrRepo,
-        DefaultConfig.ocrDictPath(langGroup),
-      );
-      const dictText = await dictResp.text();
-      this.charset = buildCharset(dictText);
+      if (this.opts.bundledDictPath) {
+        const url = browser.runtime.getURL(this.opts.bundledDictPath as any);
+        const res = await fetch(url);
+        const dictText = await res.text();
+        this.charset = buildCharset(dictText);
+      } else {
+        const dictResp = await downloadArtifactHF(
+          repo,
+          DefaultConfig.ocrDictPath(langGroup),
+        );
+        const dictText = await dictResp.text();
+        this.charset = buildCharset(dictText);
+      }
     }
 
     const crops = bboxes

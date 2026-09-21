@@ -21,6 +21,9 @@ export const env = {
     import.meta.env.WXT_PADDLE_OCR_MODEL_REPO || "monkt/paddleocr-onnx",
   mangaOCRModelRepo:
     import.meta.env.WXT_MANGA_OCR_MODEL_REPO || "mayocream/manga-ocr-onnx",
+  ppocrv6MangaRepo:
+    import.meta.env.WXT_PPOCRV6_MANGA_REPO ||
+    "fumetodev/PP-OCRv6_small_rec_manga_ONNX",
 
   // Inpaint models
   lamaInpaintModelRepo:

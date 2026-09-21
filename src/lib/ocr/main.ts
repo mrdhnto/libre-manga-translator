@@ -22,14 +22,26 @@ import { isTrustedLabel } from "../gate/charset";
 import type { OCRResult, OcrEngine, OcrOutcome } from "./types";
 import { PaddleOcrEngine } from "./paddle";
 import { MangaOcrEngine } from "./manga-ocr";
+import { env } from "../env";
 
 export type { OCRResult, OcrOutcome };
 
 const paddleEngine = new PaddleOcrEngine();
 const mangaOcrEngine = new MangaOcrEngine();
+// PP-OCRv6 small rec, manga fine-tune (Japanese-only): same CTC contract as
+// PaddleOCR (48px height, stock ppocrv6 dict + space + blank), fixed file +
+// bundled dict, so it reuses the Paddle runner.
+const ppocrv6MangaEngine = new PaddleOcrEngine({
+  id: "ppocrv6-manga",
+  label: "PP-OCRv6 Manga (Japanese)",
+  repo: env.ppocrv6MangaRepo,
+  modelPath: () => "ppocr-rec-v6-small-manga.onnx",
+  bundledDictPath: "dicts/ppocrv6_dict.txt",
+});
 
 export function getOcrEngine(id = DefaultConfig.ocrEngine): OcrEngine {
   if (id === "manga-ocr") return mangaOcrEngine;
+  if (id === "ppocrv6-manga") return ppocrv6MangaEngine;
   return paddleEngine;
 }
 

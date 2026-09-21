@@ -81,6 +81,7 @@
   });
   let prevDetectionModel = untrack(() => detectionModel);
   let prevSourceLang = untrack(() => sourceLang);
+  let prevOcrEngine = untrack(() => ocrEngine);
   let prevMode = untrack(() => currentMode);
   let isFetchingDetection = $state(false);
   let isFetchingOCR = $state(false);
@@ -372,9 +373,11 @@
     const prevLangGroup = resolveLangGroup(prevSourceLang).group;
     const langGroupChangedInLocal =
       currentLangGroup !== prevLangGroup && isOcrMode;
+    const engineChangedInLocal = ocrEngine !== prevOcrEngine && isOcrMode;
 
-    if (switchedToLocal || langGroupChangedInLocal) {
+    if (switchedToLocal || langGroupChangedInLocal || engineChangedInLocal) {
       prevSourceLang = sourceLang;
+      prevOcrEngine = ocrEngine;
       prevMode = currentMode;
       isFetchingOCR = true;
 
@@ -383,12 +386,13 @@
           type: "PREFETCH_MODEL",
           data: {
             type: "ocr",
-            data: currentLangGroup,
+            data: ocrEngine === "paddle" ? currentLangGroup : ocrEngine,
           },
         })
         .finally(() => (isFetchingOCR = false));
     } else {
       prevSourceLang = sourceLang;
+      prevOcrEngine = ocrEngine;
       prevMode = currentMode;
     }
   });
@@ -777,7 +781,7 @@
                 {isFetchingDetection}
               />
 
-              <OcrSettings bind:ocrMinConfidence bind:scriptGate bind:ocrEngine />
+              <OcrSettings bind:ocrMinConfidence bind:scriptGate bind:ocrEngine sourceLang={sourceLang} />
 
               <div>
                 <span class="text-sm font-bold uppercase tracking-widest text-zinc-500 ml-1">

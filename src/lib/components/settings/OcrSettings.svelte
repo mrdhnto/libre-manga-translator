@@ -6,24 +6,32 @@
     ocrMinConfidence = $bindable(DefaultConfig.ocrMinConfidence),
     scriptGate = $bindable(DefaultConfig.scriptGate),
     ocrEngine = $bindable(DefaultConfig.ocrEngine),
+    sourceLang = DefaultConfig.sourceLang,
   }: {
     ocrMinConfidence: number;
     scriptGate: boolean;
     ocrEngine?: string;
+    sourceLang?: string;
   } = $props();
 
   const ENGINES = [
     {
       id: "paddle",
       label: "PaddleOCR",
-      size: "~80 MB",
+      size: "~90 MB",
       desc: "Fast, lightweight multilingual engine (default)",
+    },
+    {
+      id: "ppocrv6-manga",
+      label: "PP-OCRv6 Manga",
+      size: "~21 MB",
+      desc: "Japanese-only manga fine-tune — a little bit limited but smaller size",
     },
     {
       id: "manga-ocr",
       label: "Manga-OCR",
       size: "~460 MB",
-      desc: "Specialized for Japanese manga & vertical text",
+      desc: "Flagship model for Japanese text & vertical writing",
     },
   ];
 
@@ -62,6 +70,11 @@
             {activeEng.desc}
           </div>
         </div>
+      {/if}
+      {#if ocrEngine === "ppocrv6-manga" && sourceLang !== "Japanese"}
+        <p class="text-[10px] text-amber-600 dark:text-amber-400 leading-snug">
+          PP-OCRv6 Manga is Japanese-only — results for {sourceLang} may be poor.
+        </p>
       {/if}
     </div>
 

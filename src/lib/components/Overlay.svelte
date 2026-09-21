@@ -17,6 +17,7 @@
     BoxSelect,
   } from "lucide-svelte";
   import { DefaultConfig, resolveLangGroup } from "@/lib/configs";
+  import { env } from "@/lib/env";
   import { isArtifactCached } from "@/lib/utils";
 
   interface Props {
@@ -198,7 +199,6 @@ function applyBboxesSort() {
     if (mode !== "refining") return;
 
     mode = "loading";
-    loadingMsg = "Please wait while we translate the text...";
     applyBboxesSort();
 
     // If the expected rec pack isn't cached, say so: otherwise a first-run
@@ -210,30 +210,47 @@ function applyBboxesSort() {
         storage.getItem<string>("sync:source-lang"),
         storage.getItem<string>("sync:ocr-engine"),
       ]);
-      if (
-        (engine ?? DefaultConfig.ocrEngine) === "paddle" &&
-        typeof caches !== "undefined"
-      ) {
-        const { group } = resolveLangGroup(
-          srcLang ?? DefaultConfig.sourceLang,
-        );
-        const [recCached, dictCached] = await Promise.all([
-          isArtifactCached(
-            DefaultConfig.ocrRepo,
-            DefaultConfig.ocrModelPath(group),
-          ),
-          isArtifactCached(
-            DefaultConfig.ocrRepo,
-            DefaultConfig.ocrDictPath(group),
-          ),
-        ]);
-        if (!recCached || !dictCached) {
-          loadingMsg = `Downloading OCR model (languages/${group}/rec.onnx)…`;
+      const engineId = engine ?? DefaultConfig.ocrEngine;
+      if (engineId !== "gemini" && typeof caches !== "undefined") {
+        let langGroup = "";
+        let missing = false;
+        if (engineId === "paddle") {
+          const { group } = resolveLangGroup(
+            srcLang ?? DefaultConfig.sourceLang,
+          );
+          const [recCached, dictCached] = await Promise.all([
+            isArtifactCached(
+              DefaultConfig.ocrRepo,
+              DefaultConfig.ocrModelPath(group),
+            ),
+            isArtifactCached(
+              DefaultConfig.ocrRepo,
+              DefaultConfig.ocrDictPath(group),
+            ),
+          ]);
+          langGroup = group;
+          missing = !recCached || !dictCached;
+        } else if (engineId === "ppocrv6-manga") {
+          missing = !(await isArtifactCached(
+            env.ppocrv6MangaRepo,
+            "ppocr-rec-v6-small-manga.onnx",
+          ));
+        } else if (engineId === "manga-ocr") {
+          const [encCached, decCached] = await Promise.all([
+            isArtifactCached(DefaultConfig.mangaOcrRepo, "encoder_model.onnx"),
+            isArtifactCached(DefaultConfig.mangaOcrRepo, "decoder_model.onnx"),
+          ]);
+          missing = !encCached || !decCached;
+        }
+        if (missing) {
+          loadingMsg = langGroup === "" ? `Downloading Model…` : `Downloading Language ${langGroup}…`;
         }
       }
     } catch {
       // Cache probe failed — keep the generic message.
     }
+
+    loadingMsg = "Please wait while we translate the text...";
 
     const result = await requestTextTranslation(
       $state.snapshot(bboxes),

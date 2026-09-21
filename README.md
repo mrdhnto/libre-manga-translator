@@ -89,7 +89,7 @@ OCR + Translation in one call"]
     Gemini --> Text
 
     Mode -->|WebGPU| OCR["Script gate: pixels + text, then
-OCR engine on-device (Paddle / Manga-OCR, CPU/WASM)"]
+OCR engine on-device (Paddle / PP-OCRv6 Manga / Manga-OCR, CPU/WASM)"]
     Mode -->|API| OCR
 
     OCR --> Raw[Raw Text per Bubble]
@@ -154,7 +154,7 @@ Detection never sends an image anywhere. The detection models run in a dedicated
 
 **Language gate.** Before translating, LMT checks each detected region really holds the source language - a lightweight on-device script-identification model (a ~3.7 MB download) over the actual pixels, confirmed against the recognized text. Sound effects, lettering over artwork, and a localiser's Latin text on a Japanese page are held back instead of machine-translated into garbage: they keep their original text and are marked with a dashed outline and a **Translate anyway** button, so a wrong call is always one click from being undone. Strict when you pick a source language (especially Japanese/Chinese/Korean), gentle under **Auto-Detect** where it follows the page's majority script. Toggle in **Settings › OCR**.
 
-**OCR engine choice.** Pick the text reader in **Settings › OCR**: PaddleOCR (~90 MB, fast multilingual default — Latin + Chinese/Japanese packs ship at setup, 9 more language packs download on first use and the script gate auto-switches packs per page) or Manga-OCR (~460 MB, Japanese manga specialist that handles vertical text and stylized lettering). If the needed pack isn't cached yet, the overlay says which model it's downloading instead of spinning silently. Held-back regions keep their recognized text so you can still view and edit it.
+**OCR engine choice.** Pick the text reader in **Settings › OCR**: PaddleOCR (~90 MB, fast multilingual default — Latin + Chinese/Japanese packs ship at setup, 9 more language packs download on first use and the script gate auto-switches packs per page), PP-OCRv6 Manga (~21 MB, Japanese-only manga fine-tune — a little bit limited but smaller size: furigana isn't suppressed so drop ruby lines before recognition, and rare kanji plus the ♥ glyph are the most common residual errors), or Manga-OCR (~460 MB, flagship model for Japanese text & vertical writing). If the needed pack isn't cached yet, the overlay says which model it's downloading instead of spinning silently. Held-back regions keep their recognized text so you can still view and edit it.
 
 **Model storage.** **Settings › Model Storage** lists every downloaded weight with its size and language-group badge (e.g. `latin`, `chinese` for PaddleOCR packs), plus per-model delete and full cache clear. Translation results are keyed per page + image, so re-opening a page reuses prior work.
 
@@ -334,7 +334,7 @@ Full table with accuracy metrics, licenses, and weight links: [docs/technical.md
 
 ## Tech Stack
 
-WXT + Svelte 5 + TypeScript + Tailwind CSS. On-device detection (YOLO26 / RT-DETR / ComicTextDetector), OCR (PaddleOCR / Manga-OCR), and Fast inpaint ladder (planar fill / denoise / Telea) or Quality LaMa-first pass via ONNX Runtime Web; WebLLM Qwen3, Gemini, or self-hosted LLM for translation. Bun for builds.
+WXT + Svelte 5 + TypeScript + Tailwind CSS. On-device detection (YOLO26 / RT-DETR / ComicTextDetector), OCR (PaddleOCR / PP-OCRv6 Manga / Manga-OCR), and Fast inpaint ladder (planar fill / denoise / Telea) or Quality LaMa-first pass via ONNX Runtime Web; WebLLM Qwen3, Gemini, or self-hosted LLM for translation. Bun for builds.
 
 Full layer table: [docs/technical.md](docs/technical.md).
 
@@ -362,6 +362,7 @@ for day-to-day activity between releases.
 - *Language gate* - on-device script verification that stops sound effects, artwork lettering, and wrong-language text from being machine-translated into garbage; every hold-back is one-click overridable.
 - *Deterministic region build* - merged fragments, dropped speckle, reading-order stability after detection.
 - *Manga-OCR engine* - selectable Japanese specialist (~460 MB) that fixes vertical text and stylized lettering PaddleOCR dropped or misread. Pick it in **Settings › OCR**.
+- *PP-OCRv6 Manga engine* - Japanese-only manga fine-tune (~21 MB) between PaddleOCR and Manga-OCR in the picker: a little bit limited (furigana not suppressed, rare kanji + ♥ glyph errors remain) but smaller size. Same CTC contract as PaddleOCR with a bundled dictionary.
 - *Quality inpainting (LaMa-first)* - deep-learning redraw for screentone/halftone/art behind text (~207 MB one-time download, ~30–60s per region on CPU), with automatic Fast fallback per region. Pick **Fast** or **Quality** under **Appearance › Inpainting**.
 - *Extra detectors + model storage* - RT-DETR bubble detector and Comic Text Detector with pixel-mask seeding in **Settings › Detection**; **Settings › Model Storage** lists, deletes, and clears cached weights.
 - *Per-language PaddleOCR packs* - 11 recognition packs (latin, chinese, korean, thai, arabic, hindi, …) resolved per page by the script gate under Auto-Detect or by your source language; Latin + Chinese/Japanese download during onboarding so the common switch needs no mid-translate fetch. Korean, Thai, and other packs fetch on first encounter, with an overlay download notice while they do.
@@ -440,7 +441,7 @@ LMT's environment.
 
 ### Key Components
 
-Detection (YOLO26, RT-DETR, ComicTextDetector), script gate (OSD LSTM), OCR (PaddleOCR, Manga-OCR), inpainting (auto ladder + optional LaMa), local translation (WebLLM Qwen3 4B / 8B). Built on WXT + Svelte 5 + TypeScript + Tailwind CSS.
+Detection (YOLO26, RT-DETR, ComicTextDetector), script gate (OSD LSTM), OCR (PaddleOCR, PP-OCRv6 Manga, Manga-OCR), inpainting (auto ladder + optional LaMa), local translation (WebLLM Qwen3 4B / 8B). Built on WXT + Svelte 5 + TypeScript + Tailwind CSS.
 
 Full per-model table with sizes, licenses, and weight links: [docs/technical.md](docs/technical.md).
 

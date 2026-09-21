@@ -349,13 +349,23 @@
     }
   }
 
-  async function checkOcrStatus(): Promise<boolean> {
-    ocrError = null;
+  function ocrEngineLabel(): string {
+    if (selectedOcrEngine === "manga-ocr") return "Manga-OCR";
+    if (selectedOcrEngine === "ppocrv6-manga") return "PP-OCRv6 Manga";
+    return "PaddleOCR";
+  }
+
+  async function checkOcrStatus(): Promise<boolean> {    ocrError = null;
     let cached = false;
     if (selectedOcrEngine === "manga-ocr") {
       cached =
         (await isArtifactCached(DefaultConfig.mangaOcrRepo, "encoder_model.onnx")) &&
         (await isArtifactCached(DefaultConfig.mangaOcrRepo, "decoder_model.onnx"));
+    } else if (selectedOcrEngine === "ppocrv6-manga") {
+      cached = await isArtifactCached(
+        env.ppocrv6MangaRepo,
+        "ppocr-rec-v6-small-manga.onnx",
+      );
     } else {
       // First-run ships Latin + Chinese/Japanese packs so the Auto-Detect
       // gate can switch between them without downloading mid-translate.
@@ -411,6 +421,16 @@
           },
         );
         await fetchAndCacheWithProgress(DefaultConfig.mangaOcrRepo, "vocab.txt");
+      } else if (selectedOcrEngine === "ppocrv6-manga") {
+        await fetchAndCacheWithProgress(
+          env.ppocrv6MangaRepo,
+          "ppocr-rec-v6-small-manga.onnx",
+          (loaded, total) => {
+            const pct = total > 0 ? Math.round((loaded / total) * 100) : 0;
+            ocrProgress = pct;
+            ocrProgressText = `${(loaded / 1024 / 1024).toFixed(1)} MB${total > 0 ? ` / ${(total / 1024 / 1024).toFixed(1)} MB` : ""}`;
+          },
+        );
       } else {
         const packProgress = (step: number, steps: number) => (loaded: number, total: number) => {
           const base = ((step - 1) / steps) * 100;
@@ -1513,6 +1533,24 @@
                   </button>
 
                   <button
+                    onclick={() => (selectedOcrEngine = "ppocrv6-manga")}
+                    class="p-4 rounded-xl border-2 text-left cursor-pointer transition-all
+                      {selectedOcrEngine === 'ppocrv6-manga'
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                      : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 hover:border-zinc-300 dark:hover:border-zinc-700'}"
+                  >
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="text-sm font-bold {selectedOcrEngine === 'ppocrv6-manga' ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-700 dark:text-zinc-300'}">
+                        PP-OCRv6 Manga
+                      </span>
+                      <span class="text-[10px] font-mono text-zinc-400">~21 MB</span>
+                    </div>
+                    <p class="text-xs text-zinc-500 dark:text-zinc-400 leading-snug">
+                      Japanese-only manga fine-tune — a little bit limited but smaller size.
+                    </p>
+                  </button>
+
+                  <button
                     onclick={() => (selectedOcrEngine = "manga-ocr")}
                     class="p-4 rounded-xl border-2 text-left cursor-pointer transition-all
                       {selectedOcrEngine === 'manga-ocr'
@@ -1526,7 +1564,7 @@
                       <span class="text-[10px] font-mono text-zinc-400">~460 MB</span>
                     </div>
                     <p class="text-xs text-zinc-500 dark:text-zinc-400 leading-snug">
-                      Specialized ViT + BERT seq2seq model for Japanese manga dialogue and vertical text.
+                      Flagship model for Japanese text & vertical writing.
                     </p>
                   </button>
                 </div>
@@ -1547,12 +1585,12 @@
                       {#if ocrDownloading}
                         <LoaderCircle size={15} class="animate-spin text-blue-500 shrink-0" />
                         <span class="text-xs font-semibold text-blue-700 dark:text-blue-300">
-                          Downloading {selectedOcrEngine === "manga-ocr" ? "Manga-OCR" : "PaddleOCR"}...
+                          Downloading {ocrEngineLabel()}...
                         </span>
                       {:else if ocrDownloaded}
                         <CircleCheck size={15} class="text-emerald-500 shrink-0" />
                         <span class="text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                          {selectedOcrEngine === "manga-ocr" ? "Manga-OCR" : "PaddleOCR"} cached and ready to use.
+                          {ocrEngineLabel()} cached and ready to use.
                         </span>
                       {:else if ocrError}
                         <CircleAlert size={15} class="text-red-500 shrink-0" />

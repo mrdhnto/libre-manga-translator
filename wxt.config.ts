@@ -33,6 +33,7 @@ export default defineConfig({
           "/content-scripts/*",
           "/*.wasm",
           "/*.mjs",
+          "/dicts/*",
           "/fonts/*",
           "/icon/*",
         ],

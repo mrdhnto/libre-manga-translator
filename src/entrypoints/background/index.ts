@@ -299,6 +299,9 @@ export default defineBackground(() => {
               } else if (url.includes("manga-ocr") || cacheName.includes("manga-ocr")) {
                 category = "OCR";
                 name = `Manga-OCR (${url.split("/").pop()})`;
+              } else if (url.toLowerCase().includes("ppocr") || cacheName.toLowerCase().includes("ppocr")) {
+                category = "OCR";
+                name = `PP-OCRv6 Manga (${url.split("/").pop()})`;
               } else if (url.includes("paddleocr") || url.includes("languages/")) {
                 category = "OCR";
                 name = `PaddleOCR (${url.split("/").pop()})`;
@@ -484,6 +487,9 @@ export default defineBackground(() => {
               downloadArtifactHF(DefaultConfig.mangaOcrRepo, "decoder_model.onnx", false, true),
               downloadArtifactHF(DefaultConfig.mangaOcrRepo, "vocab.txt", false, true),
             ]);
+          } else if (data === "ppocrv6-manga") {
+            // Fixed-file engine with a bundled dict — onnx only.
+            await downloadArtifactHF(env.ppocrv6MangaRepo, "ppocr-rec-v6-small-manga.onnx", false, true);
           } else {
             // `data` is usually a resolved lang group from the popup; accept a
             // language name too. Missing/unknown stays "chinese" (CJK focus).

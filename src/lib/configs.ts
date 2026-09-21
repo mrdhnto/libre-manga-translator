@@ -92,7 +92,7 @@ export const DefaultConfig = {
   lamaRepo: env.lamaInpaintModelRepo,
   lamaModelPath: "lama-manga.onnx" as `${string}.onnx`,
 
-  ocrEngine: "paddle",
+  ocrEngine: "paddle", // "paddle" | "ppocrv6-manga" (JA-only) | "manga-ocr" (JA-only)
   ocrAutoUpdate: true,
   ocrMinConfidence: 0.7,
   ocrLangGroupMap, // Map source language to language group for model & dictionary selection

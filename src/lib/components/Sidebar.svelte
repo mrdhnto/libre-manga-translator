@@ -15,7 +15,7 @@
     LoaderCircle,
     HardDrive,
   } from "lucide-svelte";
-  import { DefaultConfig } from "@/lib/configs";
+  import { DefaultConfig, resolveLangGroup } from "@/lib/configs";
   import { normalizeInpaintMethod } from "@/lib/inpaint/ladder";
   import DetectionSettings from "./settings/DetectionSettings.svelte";
   import OcrSettings from "./settings/OcrSettings.svelte";
@@ -69,6 +69,10 @@
   let saveTimer: ReturnType<typeof setTimeout>;
   let loadingSettings = $state(true);
   let seriesName = $state("");
+  let isFetchingOCR = $state(false);
+  let prevSourceLang = $state(DefaultConfig.sourceLang);
+  let prevOcrEngine = $state(DefaultConfig.ocrEngine);
+  let prevMode = $state(DefaultConfig.currentMode);
 
   // 6 consolidated tabs (was 8)
   const SECTIONS = [
@@ -255,6 +259,43 @@
     debouncedSave();
   });
 
+  // Warm the OCR weights when the language group or engine changes in a local
+  // mode (mirrors the popup prefetch effect) and spin the source-language
+  // loader while the download lands.
+  $effect(() => {
+    if (loadingSettings) return;
+    const isOcrMode = currentMode === "webgpu" || currentMode === "api";
+    const switchedToLocal = currentMode !== prevMode && isOcrMode;
+    const groupChanged =
+      resolveLangGroup(sourceLang).group !==
+        resolveLangGroup(prevSourceLang).group && isOcrMode;
+    const engineChanged = ocrEngine !== prevOcrEngine && isOcrMode;
+
+    if (switchedToLocal || groupChanged || engineChanged) {
+      prevSourceLang = sourceLang;
+      prevOcrEngine = ocrEngine;
+      prevMode = currentMode;
+      isFetchingOCR = true;
+
+      browser.runtime
+        .sendMessage({
+          type: "PREFETCH_MODEL",
+          data: {
+            type: "ocr",
+            data:
+              ocrEngine === "paddle"
+                ? resolveLangGroup(sourceLang).group
+                : ocrEngine,
+          },
+        })
+        .finally(() => (isFetchingOCR = false));
+    } else {
+      prevSourceLang = sourceLang;
+      prevOcrEngine = ocrEngine;
+      prevMode = currentMode;
+    }
+  });
+
   function setMode(modeId: string) {
     currentMode = modeId;
     if (modeId === "gemini") {
@@ -421,6 +462,9 @@
                   onclick={() => (activeDropdown = activeDropdown === "source" ? null : "source")}
                   class="flex-1 flex items-center justify-center gap-1 p-2 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-colors text-xs font-semibold cursor-pointer"
                 >
+                  {#if isFetchingOCR}
+                    <LoaderCircle size={11} class="animate-spin text-blue-500 shrink-0" />
+                  {/if}
                   {sourceLang}
                   <ChevronDown size={11} class="opacity-50 shrink-0" />
                 </button>
@@ -479,7 +523,7 @@
               <p class="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">
                 OCR Threshold
               </p>
-              <OcrSettings bind:ocrMinConfidence bind:scriptGate bind:ocrEngine />
+              <OcrSettings bind:ocrMinConfidence bind:scriptGate bind:ocrEngine sourceLang={sourceLang} />
             </div>
           </div>
         {/if}

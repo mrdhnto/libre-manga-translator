@@ -230,19 +230,12 @@
                   >
                     {item.category}
                   </span>
-                  <!-- parent folder name (eg. language, ocr name as fallback) -->
                   {#if getLangBadge(item)}
                     <span
                       class="text-[9px] font-semibold px-1.5 py-0.2 rounded bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300"
                       title="PaddleOCR language group"
                     >
                       {getLangBadge(item)}
-                    </span>
-                  {:else}
-                    <span
-                      class="text-[9px] font-semibold px-1.5 py-0.2 rounded bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
-                    >
-                      {item.name}
                     </span>
                   {/if}
                   {formatBytes(item.size)}

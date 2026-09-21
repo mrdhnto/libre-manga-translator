@@ -29,7 +29,7 @@ Developer-facing details for Libre Manga Translator: models, settings, pipeline 
 | Styling | Tailwind CSS |
 | Bubble / text detection | YOLO26 ONNX + RT-DETR ONNX + ComicTextDetector ONNX via ONNX Runtime Web (`onnxruntime-web`) |
 | Script gate | OSD script-identification LSTM (~3.7 MB, ONNX Runtime Web) + Unicode-block text verification |
-| On-device OCR | PaddleOCR ONNX (`~80 MB`, multilingual default) or Manga-OCR ONNX (`~460 MB`, Japanese specialist) |
+| On-device OCR | PaddleOCR ONNX (`~90 MB` Latin + Chinese/Japanese packs, multilingual default), PP-OCRv6 Manga ONNX (`~21 MB`, Japanese-only manga fine-tune) or Manga-OCR ONNX (`~460 MB`, Japanese flagship) |
 | Inpainting | Auto engine ladder: pure-JS planar fill (rung 0) / bilateral denoise (rung 1) / optional LaMa redraw (rung 2, `~207 MB`) / Telea fast-marching (rung 3) |
 | Local translation | [WebLLM](https://webllm.mlc.ai/) (Qwen3 4B / 8B) |
 | Cloud translation | Gemini API via REST |
@@ -93,8 +93,9 @@ Selectable in **Settings › Text Recognition (OCR) › OCR Engine** (`src/lib/c
 
 | Engine | Size | Best for |
 |---|---|---|
-| PaddleOCR (default) | `~80 MB` | Fast multilingual generalist. Per-language-group `rec.onnx` + `dict.txt` under `languages/<group>/`. |
-| Manga-OCR | `~460 MB` | Japanese manga specialist (ViT encoder + BERT decoder, 6144 vocab). Handles vertical text and stylized lettering that PaddleOCR drops or misreads. One-time large download. |
+| PaddleOCR (default) | `~90 MB` (Latin + Chinese/Japanese packs ship at setup) | Fast multilingual generalist. Per-language-group `rec.onnx` + `dict.txt` under `languages/<group>/`, resolved per page by `resolveLangGroup()` (`src/lib/configs.ts`) or the script gate's page majority under Auto-Detect; 9 more packs download on first use. |
+| PP-OCRv6 Manga | `~21 MB` | Japanese-only manga fine-tune ([fumetodev/PP-OCRv6_small_rec_manga_ONNX](https://huggingface.co/fumetodev/PP-OCRv6_small_rec_manga_ONNX)) — a little bit limited but smaller size. Same CTC contract as PaddleOCR (48px height, stock ppocrv6 dict + space + blank), fixed file + bundled `public/dicts/ppocrv6_dict.txt` (refresh via `bun run extract-dict`). Limits (per model card): Japanese only; furigana is not suppressed — drop ruby lines before recognition; rare kanji outside the manga distribution and the ♥ glyph are the most common residual errors. |
+| Manga-OCR | `~460 MB` | Flagship model for Japanese text & vertical writing (ViT encoder + BERT decoder, 6144 vocab). Handles vertical text and stylized lettering that PaddleOCR drops or misreads. One-time large download. |
 
 Related settings:
 
@@ -104,26 +105,26 @@ Related settings:
 | Language Gate | On | See [Script Gate](#script-gate). |
 | Auto-Update | On | Downloads new OCR weights automatically. |
 
-Preprocessing per region (`src/lib/ocr/utils.ts`, `src/lib/ocr/main.ts`): polarity normalization → contrast boost → padding; single-line crops (`min(h, w) < 24px`) go through whole, larger regions are sliced into lines. OCR runs at `recImgHeight: 48`, batch size 4 (`src/lib/configs.ts`).
+Preprocessing per region (`src/lib/ocr/utils.ts`, `src/lib/ocr/main.ts`): polarity normalization → contrast boost → padding; single-line crops (`min(h, w) < 24px`) go through whole, larger regions are sliced into lines. OCR runs at `recImgHeight: 48`, batch size 4 (`src/lib/configs.ts`). The PaddleOCR session is keyed `repo:file` so per-group packs swap and fixed-file engines keep their session; swaps log `[ocr] swapping/loading rec model`.
 
-Current target: Japanese and vertical text are considered fixed via Manga-OCR. Chinese and Korean (manhua / manhwa / webtoon) coverage is the planned OCR work.
+Current state: per-language packs ship/fetch automatically (Latin + Chinese/Japanese in onboarding, the rest on first use, overlay names the pack while downloading). Remaining OCR work is recognition quality on Chinese/Korean layouts (manhua / manhwa / webtoon).
 
 ## Inpaint Ladder
 
 Source: `src/lib/inpaint/` (`mask.ts`, `ring.ts`, `fit.ts`, `fill.ts`, `denoise.ts`, `telea.ts`, `lama.ts`, `ladder.ts`, `quality.ts`, `constants.ts`). Pure TypeScript, no new runtime dependencies. Self-check: `bun run check:inpaint` (`scripts/inpaint-selfcheck.ts`).
 
-Default `sync:inpaint-method = auto` fits a text-shaped mask per region (`buildInkSeed`, or `buildSegmentationSeed` when a Comic Text Detector mask exists) and uses the lightest engine that passes the quality check:
+Default `sync:inpaint-method = fast` fits a text-shaped mask per region (`buildInkSeed`, or `buildSegmentationSeed` when a Comic Text Detector mask exists) and uses the lightest engine that passes the quality check:
 
 | Rung | Engine | When it wins |
 |---|---|---|
 | 0 | Planar fill | Flat paper around the text; samples the paper annulus (`measureRing`, least-squares plane fit). |
 | 1 | Bilateral denoise | Grainy / JPEG scans (5×5, range σ = page noise floor). |
-| 2 (opt-in) | LaMa redraw | Complex screentone, halftone, art behind text. Toggle **LaMa Redraw Model** under **Appearance › Inpainting** (`sync:inpaint-lama`). One-time `~207 MB` download, `~500 MB` RAM/VRAM, `~1–2s` per complex region. 512² tiled inference, 128px overlap. |
+| 2 (Quality only) | LaMa redraw | Complex screentone, halftone, art behind text. Toggle **Quality** under **Appearance › Inpainting** (`sync:inpaint-method = quality`). One-time `~207 MB` download, `~500 MB` RAM/VRAM, `~30–60s` per complex region on CPU. 512² tiled inference, 128px overlap; falls back into Fast per region where LaMa declines. |
 | 3 | Telea fast-marching | Real rebuilds where fill/denoise fail. Pure-JS implementation (MV3-safe, no `unsafe-eval`). |
 
 Quality check (`quality.ts`): post-edit interior edge-energy `> 2×` the 32px surround, or off-tone vs surround p5–p95 → decline and climb to the next rung. If nothing passes, the region is left exactly as-is and flagged declined (overlay shows a declined marker). Untouched pixels stay identical — no ghost rectangles, halos, or flat patches.
 
-Method picker (`src/lib/components/settings/InpaintSettings.svelte`): **Auto** (recommended) / **Telea** (legacy full-region fast-marching) / **Fast** (edge-blend, quicker and cruder). Per-region provenance (`{method, deviation, thickness, ms}`) and per-rung counts surface in the debug panel.
+Method picker (`src/lib/components/settings/InpaintSettings.svelte`): **Fast** (model-free ladder, default) / **Quality** (LaMa-first pass, strict superset of Fast). Per-region provenance (`{method, deviation, thickness, ms}`) and per-rung counts surface in the debug panel.
 
 ## Script Gate
 
@@ -133,7 +134,7 @@ Before translating, each region is checked against the source language: a lightw
 
 ## Model Storage & Cache Management
 
-**Settings › Model Storage** (`src/lib/components/settings/ModelStorageSettings.svelte`) lists every downloaded weight with its size, plus per-model delete and full cache clear. Background prefetch (`PREFETCH_MODEL` in `src/entrypoints/background/index.ts`) supports all model types so onboarding and settings can warm the cache. Translation results are keyed by series + chapter + resolved page + image hash, so re-opening a page reuses prior OCR/translation work.
+**Settings › Model Storage** (`src/lib/components/settings/ModelStorageSettings.svelte`) lists every downloaded weight with its size plus a language badge parsed from the cached URL (`languages/<group>/` → language badge, otherwise model-name fallback), per-model delete and full cache clear. Popup and sidebar prefetch OCR weights on language/engine change (source-language loader spins while the pack lands). Onboarding ships Latin + Chinese/Japanese PaddleOCR packs so the script gate flips between them with no mid-translate fetch; other packs download on first use while the overlay names the model being downloaded. Background prefetch (`PREFETCH_MODEL` in `src/entrypoints/background/index.ts`) supports all model types so onboarding and settings can warm the cache. Translation results are keyed by series + chapter + resolved page + image hash, so re-opening a page reuses prior OCR/translation work.
 
 ## Environment Overrides
 
@@ -145,6 +146,7 @@ WXT_RTDETR_MODEL_REPO=ogkalu/comic-text-and-bubble-detector
 WXT_COMIC_TEXT_DETECTOR_URL=https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.3/comictextdetector.pt.onnx
 WXT_PADDLE_OCR_MODEL_REPO=monkt/paddleocr-onnx
 WXT_MANGA_OCR_MODEL_REPO=mayocream/manga-ocr-onnx
+WXT_PPOCRV6_MANGA_REPO=fumetodev/PP-OCRv6_small_rec_manga_ONNX
 WXT_LAMA_INPAINT_MODEL_REPO=mayocream/lama-manga-onnx
 WXT_GATE_MODEL_REPO=ogkalu/image-script-identification
 ```
@@ -222,7 +224,8 @@ cache and follows its upstream license.
 | Bubble detection (alt) | `comic-text-and-bubble-detector` RT-DETR-v2 by ogkalu ([Hugging Face](https://huggingface.co/ogkalu/comic-text-and-bubble-detector)) | ogkalu | Apache-2.0 | 11.1 MB |
 | Text boxes + segmentation | `comictextdetector.pt.onnx` by dmMaze via manga-image-translator ([GitHub](https://github.com/dmMaze/comic-text-detector)) | dmMaze / zyddnys | **GPL-3.0** (see note) | ~95 MB |
 | Script gate | `image-script-identification` OSD LSTM by ogkalu ([Hugging Face](https://huggingface.co/ogkalu/image-script-identification)) | ogkalu | Apache-2.0 | ~3.7 MB |
-| OCR (default) | PaddleOCR ONNX, per language group ([Hugging Face](https://huggingface.co/monkt/paddleocr-onnx)) | PaddlePaddle | Apache-2.0 | ~15 MB / group |
+| OCR (default) | PaddleOCR ONNX, per language group ([Hugging Face](https://huggingface.co/monkt/paddleocr-onnx)) | PaddlePaddle | Apache-2.0 | ~90 MB shipped (Latin + Chinese/Japanese); ~15 MB / further group |
+| OCR (Japanese manga fine-tune) | PP-OCRv6 small rec manga ONNX by fumetodev ([Hugging Face](https://huggingface.co/fumetodev/PP-OCRv6_small_rec_manga_ONNX)) | fumetodev (base: PaddlePaddle) | Apache-2.0 | ~21 MB |
 | OCR (Japanese specialist) | Manga-OCR ONNX by mayocream / kha-white ([Hugging Face](https://huggingface.co/mayocream/manga-ocr-onnx)) | mayocream / kha-white | Apache-2.0 | ~460 MB |
 | Inpaint redraw (rung 2, opt-in) | `lama-manga.onnx` by mayocream / dreMaz / advimman ([Hugging Face](https://huggingface.co/mayocream/lama-manga-onnx)) | mayocream / dreMaz | MIT | ~207 MB |
 | Local translation | WebLLM (MLC-AI) with Qwen3 4B / 8B | MLC-AI | Apache-2.0 | 3–6 GB |
