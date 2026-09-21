@@ -448,9 +448,8 @@ export default defineContentScript({
                   );
                   let cached = inpaintedSrcCache.get(src);
                   let inpaintMethod:
-                    | "auto"
-                    | "telea"
                     | "fast"
+                    | "quality"
                     | "fallback"
                     | undefined;
                   let inpaintMs: number | undefined;

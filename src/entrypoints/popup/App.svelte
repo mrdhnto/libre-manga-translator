@@ -16,6 +16,7 @@
     Download,
   } from "lucide-svelte";
   import { DefaultConfig } from "@/lib/configs";
+  import { normalizeInpaintMethod } from "@/lib/inpaint/ladder";
   import { env } from "@/lib/env";
   import { untrack } from "svelte";
   import { openSetupTab } from "@/lib/utils";
@@ -67,7 +68,6 @@
   let saveTimer: ReturnType<typeof setTimeout>;
   let textFont = $state(DefaultConfig.bundleFonts[0].id);
   let inpaintMethod = $state(DefaultConfig.inpaintMethod);
-  let inpaintLama = $state(DefaultConfig.inpaintLama);
   let ocrEngine = $state(DefaultConfig.ocrEngine);
   let customFonts = $state<{ name: string; dataUrl: string }[]>([]);
   let latestVersion = $state<{
@@ -230,7 +230,6 @@
       "local:server-api-key",
       "sync:custom-site-rules",
       "sync:inpaint-method",
-      "sync:inpaint-lama",
       "sync:ocr-engine",
       "sync:script-gate",
     ]);
@@ -269,8 +268,9 @@
     customRules = Array.isArray(saved["sync:custom-site-rules"])
       ? saved["sync:custom-site-rules"]
       : [];
-    inpaintMethod = saved["sync:inpaint-method"] ?? inpaintMethod;
-    inpaintLama = saved["sync:inpaint-lama"] ?? inpaintLama;
+    inpaintMethod = normalizeInpaintMethod(
+      saved["sync:inpaint-method"] ?? inpaintMethod,
+    );
     const storedCtx = saved[`sync:context-${seriesName}`];
     if (storedCtx) {
       seriesContext = {
@@ -314,7 +314,6 @@
         { key: "local:server-api-key", value: serverApiKey },
         { key: "sync:custom-site-rules", value: $state.snapshot(customRules) },
         { key: "sync:inpaint-method", value: inpaintMethod },
-        { key: "sync:inpaint-lama", value: inpaintLama },
         { key: "sync:ocr-engine", value: ocrEngine },
       ]);
     }, 150);
@@ -341,7 +340,6 @@
       textFont,
       customFonts.length,
       inpaintMethod,
-      inpaintLama,
       llmModel,
       llmTemperature,
       serverHost,
@@ -809,7 +807,7 @@
 
               <TypographySettings bind:textFont bind:customFonts />
 
-              <InpaintSettings bind:inpaintMethod bind:inpaintLama />
+              <InpaintSettings bind:inpaintMethod />
 
               <SiteRulesSettings
                 bind:customRules

@@ -8,8 +8,7 @@ import {
 } from "@/lib/server/main";
 import { deleteModelAllInfoInCache } from "@mlc-ai/web-llm";
 import { makeSiteRuleLocal, translateLocal } from "@/lib/webllm";
-import { inpaintImageTelea } from "@/lib/inpaint/telea";
-import { inpaintImageAuto } from "@/lib/inpaint/ladder";
+import { inpaintImageAuto, inpaintImageQuality } from "@/lib/inpaint/ladder";
 import { getCachedSegmentation } from "@/lib/detections/segmentation";
 
 async function detectBackend(): Promise<"webgpu" | "wasm"> {
@@ -200,15 +199,15 @@ browser.runtime.onMessage.addListener((msg, _, sendResponse) => {
   }
 
   if (msg.type === "OFFSCREEN_INPAINT_IMAGE") {
-    const { src, bboxes, radius, method, useLama } = msg.data;
+    const { src, bboxes, method } = msg.data;
     const segmentation = getCachedSegmentation(src);
 
-    // "auto": per-region engine ladder (fill -> denoise -> LaMa -> Telea, decline-gated).
-    // Legacy methods keep the full-frame Telea response shape (a plain data URL).
+    // "quality": standalone LaMa-first pass with Fast fallback per region.
+    // Anything else normalizes to the Fast ladder (no model rung).
     const work: Promise<unknown> =
-      method === "auto"
-        ? inpaintImageAuto(src, bboxes, { useLama, segmentation })
-        : inpaintImageTelea(src, bboxes, radius ?? 3);
+      method === "quality"
+        ? inpaintImageQuality(src, bboxes, { segmentation })
+        : inpaintImageAuto(src, bboxes, { segmentation });
 
     work.then(sendResponse).catch((err) => sendResponse({ error: err.message }));
 

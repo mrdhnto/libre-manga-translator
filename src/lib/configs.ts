@@ -85,11 +85,10 @@ export const DefaultConfig = {
   comicTextDetectorUrl: env.comicTextDetectorUrl,
   detectionModelPath: (model: string): `${string}.onnx` => `onnx/${model}.onnx`,
 
-  // Inpainting method: "auto" (engine ladder: fitted mask -> planar fill ->
-  // denoise -> Telea, each rung decline-gated) | "telea" (legacy full-frame
-  // fast-marching) | "fast" (edge-blend)
-  inpaintMethod: "auto",
-  inpaintLama: false,
+  // Inpainting method: "fast" (model-free ladder: fitted mask -> planar fill
+  // -> denoise -> Telea, each rung decline-gated) | "quality" (standalone
+  // LaMa-first pass per region, falling back into Fast where LaMa declines)
+  inpaintMethod: "fast",
   lamaRepo: env.lamaInpaintModelRepo,
   lamaModelPath: "lama-manga.onnx" as `${string}.onnx`,
 

@@ -16,6 +16,7 @@
     HardDrive,
   } from "lucide-svelte";
   import { DefaultConfig } from "@/lib/configs";
+  import { normalizeInpaintMethod } from "@/lib/inpaint/ladder";
   import DetectionSettings from "./settings/DetectionSettings.svelte";
   import OcrSettings from "./settings/OcrSettings.svelte";
   import BackendSettings from "./settings/BackendSettings.svelte";
@@ -50,7 +51,6 @@
   let cachedLlms = $state<string[]>([]);
   let textFont = $state(DefaultConfig.bundleFonts[0].id);
   let inpaintMethod = $state(DefaultConfig.inpaintMethod);
-  let inpaintLama = $state(DefaultConfig.inpaintLama);
   let ocrEngine = $state(DefaultConfig.ocrEngine);
   let customFonts = $state<{ name: string; dataUrl: string }[]>([]);
   let customRules = $state<SiteRule[]>([]);
@@ -170,7 +170,6 @@
         "local:server-api-key",
         "sync:custom-site-rules",
         "sync:inpaint-method",
-        "sync:inpaint-lama",
         "sync:ocr-engine",
         "sync:script-gate",
         "local:cached-llms",
@@ -199,8 +198,9 @@
       useServerApiKey = saved["local:use-server-api-key"] ?? useServerApiKey;
       serverApiKey = saved["local:server-api-key"] ?? serverApiKey;
       customRules = saved["sync:custom-site-rules"] ?? customRules;
-      inpaintMethod = saved["sync:inpaint-method"] ?? inpaintMethod;
-      inpaintLama = saved["sync:inpaint-lama"] ?? inpaintLama;
+      inpaintMethod = normalizeInpaintMethod(
+        saved["sync:inpaint-method"] ?? inpaintMethod,
+      );
       scriptGate = saved["sync:script-gate"] ?? scriptGate;
       cachedLlms = Array.isArray(saved["local:cached-llms"]) ? saved["local:cached-llms"] : [];
 
@@ -237,7 +237,6 @@
         { key: "local:server-api-key", value: serverApiKey },
         { key: "sync:custom-site-rules", value: $state.snapshot(customRules) },
         { key: "sync:inpaint-method", value: inpaintMethod },
-        { key: "sync:inpaint-lama", value: inpaintLama },
         { key: "sync:ocr-engine", value: ocrEngine },
         { key: "sync:script-gate", value: scriptGate },
       ]);
@@ -498,7 +497,7 @@
         {#if activeSection === "appearance"}
           <div class="space-y-3">
             <TypographySettings bind:textFont bind:customFonts />
-            <InpaintSettings bind:inpaintMethod bind:inpaintLama />
+            <InpaintSettings bind:inpaintMethod />
           </div>
         {/if}
 

@@ -106,8 +106,8 @@ Ollama / LM Studio / OpenAI-compatible"]
     WebLLM --> Text[Translated Text per Bubble]
     Server --> Text
 
-    Text --> Inpaint["Auto inpaint ladder: fitted mask, lightest
-engine that passes quality (+ optional LaMa, declined boxes untouched)"]
+    Text --> Inpaint["Inpaint Fast or Quality: fitted mask, lightest
+engine that passes quality (Quality runs LaMa first, declined boxes untouched)"]
     Inpaint --> Paint["Repaint with Translated Text
 custom font + auto-fit sizing"]
     Paint --> Result[Translated Page]
@@ -148,19 +148,19 @@ Detection never sends an image anywhere. The detection models run in a dedicated
 
 **On-page sidebar panel.** A floating cog opens a sliding settings panel directly on the page (no need to open the popup). It shares the same settings components as the popup, so both stay in sync.
 
-**Auto inpainting (engine ladder).** The default clean path fits a text-shaped mask per region and uses the lightest engine that does the job: a planar fill that samples the paper around the text on flat pages, a bilateral denoise fill on grainy/JPEG scans, and Telea fast-marching only where the region needs a real rebuild. Every result is scored by one quality check - if it looks worse than the paper around it, the region climbs to the next engine, and if nothing passes it is left exactly as it was and flagged for you. Untouched pixels stay identical; no ghost rectangles, no flat patches, no halos. Choose **Auto** (recommended), **Telea** (legacy full-region fast-marching), or **Fast** (edge-blend) under **Appearance › Inpainting**.
+**Fast inpainting (engine ladder, default).** The default clean path fits a text-shaped mask per region and uses the lightest engine that does the job: a planar fill that samples the paper around the text on flat pages, a bilateral denoise fill on grainy/JPEG scans, and Telea fast-marching only where the region needs a real rebuild. Every result is scored by one quality check - if it looks worse than the paper around it, the region climbs to the next engine, and if nothing passes it is left exactly as it was and flagged for you. Untouched pixels stay identical; no ghost rectangles, no flat patches, no halos. No downloads, no extra memory.
+
+**Quality inpainting (LaMa redraw).** For complex screentone, halftone, and art behind text, **Quality** runs the LaMa redraw model first per region and automatically falls back into Fast wherever LaMa declines - so it is a strict superset of Fast. One-time ~207 MB download, ~500 MB RAM/VRAM, ~30–60s per complex region on CPU. Switch between **Fast** and **Quality** under **Appearance › Inpainting**.
 
 **Language gate.** Before translating, LMT checks each detected region really holds the source language - a lightweight on-device script-identification model (a ~3.7 MB download) over the actual pixels, confirmed against the recognized text. Sound effects, lettering over artwork, and a localiser's Latin text on a Japanese page are held back instead of machine-translated into garbage: they keep their original text and are marked with a dashed outline and a **Translate anyway** button, so a wrong call is always one click from being undone. Strict when you pick a source language (especially Japanese/Chinese/Korean), gentle under **Auto-Detect** where it follows the page's majority script. Toggle in **Settings › OCR**.
 
 **OCR engine choice.** Pick the text reader in **Settings › OCR**: PaddleOCR (~80 MB, fast multilingual default) or Manga-OCR (~460 MB, Japanese manga specialist that handles vertical text and stylized lettering). Held-back regions keep their recognized text so you can still view and edit it.
 
-**LaMa redraw (opt-in).** Under **Appearance › Inpainting**, enable the LaMa redraw rung for complex screentone, halftone, and art behind text. One-time ~207 MB download, ~500 MB RAM/VRAM, ~1–2s per complex region — worth it where the pure-JS rungs would leave flat patches or smudges.
-
 **Model storage.** **Settings › Model Storage** lists every downloaded weight with its size, plus per-model delete and full cache clear. Translation results are keyed per page + image, so re-opening a page reuses prior work.
 
 **Universal cross-origin & anti-hotlink support.** Automatic fallback using background declarativeNetRequest to bypass CDN referer checks and Cloudflare protection on third-party manga hosting domains (e.g. `i.sstatic.net`, `imgsrv5.com`, `scans.lastation.us`). Combined with magic-byte MIME sniffing for robust image decoding across all formats (JPEG, PNG, WebP, GIF, AVIF).
 
-**Advanced debugging.** Session logs with JSON export, clipboard copying, and per-request metadata: mode, OCR text, translations, timing per step, bbox count, inpainting method + per-rung counts (fill · denoise · telea · declined), language-gate decisions, errors. No base64 or image payloads - lean and readable.
+**Advanced debugging.** Session logs with JSON export, clipboard copying, and per-request metadata: mode, OCR text, translations, timing per step, bbox count, inpainting method (fast · quality · fallback) + per-rung counts (fill · denoise · lama · telea · declined), language-gate decisions, errors. No base64 or image payloads - lean and readable.
 
 ---
 
@@ -334,7 +334,7 @@ Full table with accuracy metrics, licenses, and weight links: [docs/technical.md
 
 ## Tech Stack
 
-WXT + Svelte 5 + TypeScript + Tailwind CSS. On-device detection (YOLO26 / RT-DETR / ComicTextDetector), OCR (PaddleOCR / Manga-OCR), and auto inpaint ladder (+ optional LaMa) via ONNX Runtime Web; WebLLM Qwen3, Gemini, or self-hosted LLM for translation. Bun for builds.
+WXT + Svelte 5 + TypeScript + Tailwind CSS. On-device detection (YOLO26 / RT-DETR / ComicTextDetector), OCR (PaddleOCR / Manga-OCR), and Fast inpaint ladder (planar fill / denoise / Telea) or Quality LaMa-first pass via ONNX Runtime Web; WebLLM Qwen3, Gemini, or self-hosted LLM for translation. Bun for builds.
 
 Full layer table: [docs/technical.md](docs/technical.md).
 
@@ -358,11 +358,11 @@ for day-to-day activity between releases.
 ### ✅ Released
 
 - *Mouse event handling in the bubble editor* - fix drag/resize interactions had takeover the event when LMT showed the overlay.
-- *Auto inpainting engine ladder* - fitted text-shaped masks and the lightest engine that passes a quality check; removes the ghost-rectangle, flat-patch, and halo artifacts of the old single-mask Telea path.
+- *Fast inpainting engine ladder* (shipped as Auto, renamed in the Beta5 RC) - fitted text-shaped masks and the lightest engine that passes a quality check; removes the ghost-rectangle, flat-patch, and halo artifacts of the old single-mask Telea path.
 - *Language gate* - on-device script verification that stops sound effects, artwork lettering, and wrong-language text from being machine-translated into garbage; every hold-back is one-click overridable.
 - *Deterministic region build* - merged fragments, dropped speckle, reading-order stability after detection.
 - *Manga-OCR engine* - selectable Japanese specialist (~460 MB) that fixes vertical text and stylized lettering PaddleOCR dropped or misread. Pick it in **Settings › OCR**.
-- *LaMa redraw rung (opt-in)* - deep-learning inpainting for screentone/halftone/art behind text (~207 MB one-time download). Toggle under **Appearance › Inpainting**.
+- *Quality inpainting (LaMa-first)* - deep-learning redraw for screentone/halftone/art behind text (~207 MB one-time download, ~30–60s per region on CPU), with automatic Fast fallback per region. Pick **Fast** or **Quality** under **Appearance › Inpainting**.
 - *Extra detectors + model storage* - RT-DETR bubble detector and Comic Text Detector with pixel-mask seeding in **Settings › Detection**; **Settings › Model Storage** lists, deletes, and clears cached weights.
 - *Region tracking & OCR hardening* - page-index + image-hash cache keys, contrast/pad preprocessing, lower default Min Confidence (0.7), gate-held boxes keep their text for viewing/editing.
 

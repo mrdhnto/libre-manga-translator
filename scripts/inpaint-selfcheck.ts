@@ -24,6 +24,7 @@ import { fitMask } from "../src/lib/inpaint/fit";
 import { renderFill } from "../src/lib/inpaint/fill";
 import { regionDeclines } from "../src/lib/inpaint/quality";
 import { AlphaRamp, planTiles, tileOrigins } from "../src/lib/inpaint/lama";
+import { normalizeInpaintMethod, planFastMethods } from "../src/lib/inpaint/ladder";
 
 let failures = 0;
 const check = (name: string, cond: boolean) => {
@@ -245,6 +246,36 @@ function fitCase(
   check("lama: alpha ramp 1.0 in core", ramp.at(fitted.ink.ox + 55, fitted.ink.oy + 28) === 1.0);
   // Outside far away
   check("lama: alpha ramp 0.0 outside", ramp.at(fitted.ink.ox + 5, fitted.ink.oy + 5) === 0.0);
+}
+
+// --- Fast vs Quality planning (no DOM needed) ---
+{
+  const eq = (a: string[], b: string[]) =>
+    a.length === b.length && a.every((v, idx) => v === b[idx]);
+
+  // Fast ladder never carries the LaMa rung, whatever the route
+  check("fast: fill route plans fill, denoise, telea", eq(planFastMethods("fill"), ["fill", "denoise", "telea"]));
+  check("fast: denoise route plans denoise, telea", eq(planFastMethods("denoise"), ["denoise", "telea"]));
+  check("fast: inpaint route plans telea only", eq(planFastMethods("inpaint"), ["telea"]));
+
+  // Quality = LaMa first, then the Fast plan for that route (fallback)
+  for (const route of ["fill", "denoise", "inpaint"] as const) {
+    const qualityPlan = ["lama", ...planFastMethods(route)];
+    check(
+      `quality: ${route} route plans lama first with fast fallback`,
+      qualityPlan[0] === "lama" && !qualityPlan.slice(1).includes("lama"),
+    );
+  }
+
+  // Stored method values normalize forward; legacy values all read as Fast
+  check("method: quality stays quality", normalizeInpaintMethod("quality") === "quality");
+  check("method: missing reads as fast", normalizeInpaintMethod(undefined) === "fast");
+  for (const legacy of ["auto", "telea", "fast", null, 42]) {
+    check(
+      `method: legacy ${JSON.stringify(legacy)} reads as fast`,
+      normalizeInpaintMethod(legacy) === "fast",
+    );
+  }
 }
 
 if (failures > 0) {

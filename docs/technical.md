@@ -212,19 +212,23 @@ Manual test matrix: WebGPU right-click translate; Gemini with API key; API Mode 
 
 ## Model Licenses
 
-LMT code is MIT. Bundled-model weights follow their upstream licenses
+LMT's own code is MIT. No model weights ship with the repository or the release
+packages — every weight below downloads on-demand to the user's local browser
+cache and follows its upstream license.
 
-- **Bubble Detection Models:**
-  - Custom YOLO26 trained on Manga109-s and MangaDex datasets by Ketut Shridhara - [Hugging Face](https://huggingface.co/Kiuyha/Manga-Bubble-YOLO) (MIT)
-  - `comic-text-and-bubble-detector` RT-DETR-v2 by ogkalu (Apache-2.0) - [Hugging Face](https://huggingface.co/ogkalu/comic-text-and-bubble-detector)
-  - `comictextdetector.pt.onnx` by dmMaze via manga-image-translator (GPL-3.0) - [GitHub](https://github.com/dmMaze/comic-text-detector) (optional on-demand user download for text boxes + pixel-level segmentation mask)
-- **Script gate model:** `image-script-identification` OSD LSTM by ogkalu (Apache-2.0) - [Hugging Face](https://huggingface.co/ogkalu/image-script-identification)
-- **OCR:**
-  - PaddleOCR ONNX models - [Hugging Face](https://huggingface.co/monkt/paddleocr-onnx) (Apache-2.0)
-  - Manga-OCR ONNX models (optional Japanese specialist) by mayocream / kha-white - [Hugging Face](https://huggingface.co/mayocream/manga-ocr-onnx) (Apache-2.0)
-- **Inpainting:**
-  - Auto engine ladder: pure-JS planar fill (rung 0), bilateral denoise (rung 1), and Telea fast-marching (rung 3)
-  - LaMa redraw model (rung 2, opt-in): `lama-manga.onnx` by mayocream / dreMaz / advimman (MIT) - [Hugging Face](https://huggingface.co/mayocream/lama-manga-onnx)
-- **Local Translation:** WebLLM (MLC-AI) with Qwen3 4B / 8B
+| Purpose | Model | Upstream | License | Size |
+|---|---|---|---|---|
+| Bubble detection (default) | YOLO26-Nano / YOLO26-Small, trained on Manga109-s + MangaDex by Ketut Shridhara ([Hugging Face](https://huggingface.co/Kiuyha/Manga-Bubble-YOLO)) | ComicTL | MIT | 2.4 / 9.5 MB |
+| Bubble detection (alt) | `comic-text-and-bubble-detector` RT-DETR-v2 by ogkalu ([Hugging Face](https://huggingface.co/ogkalu/comic-text-and-bubble-detector)) | ogkalu | Apache-2.0 | 11.1 MB |
+| Text boxes + segmentation | `comictextdetector.pt.onnx` by dmMaze via manga-image-translator ([GitHub](https://github.com/dmMaze/comic-text-detector)) | dmMaze / zyddnys | **GPL-3.0** (see note) | ~95 MB |
+| Script gate | `image-script-identification` OSD LSTM by ogkalu ([Hugging Face](https://huggingface.co/ogkalu/image-script-identification)) | ogkalu | Apache-2.0 | ~3.7 MB |
+| OCR (default) | PaddleOCR ONNX, per language group ([Hugging Face](https://huggingface.co/monkt/paddleocr-onnx)) | PaddlePaddle | Apache-2.0 | ~15 MB / group |
+| OCR (Japanese specialist) | Manga-OCR ONNX by mayocream / kha-white ([Hugging Face](https://huggingface.co/mayocream/manga-ocr-onnx)) | mayocream / kha-white | Apache-2.0 | ~460 MB |
+| Inpaint redraw (rung 2, opt-in) | `lama-manga.onnx` by mayocream / dreMaz / advimman ([Hugging Face](https://huggingface.co/mayocream/lama-manga-onnx)) | mayocream / dreMaz | MIT | ~207 MB |
+| Local translation | WebLLM (MLC-AI) with Qwen3 4B / 8B | MLC-AI | Apache-2.0 | 3–6 GB |
 
-`comictextdetector.pt.onnx` is **GPL-3.0** (zyddnys / manga-image-translator). It is not bundled in the repository or release packages. When the user selects it in settings, the weights download on-demand directly to the user's local browser cache from the upstream public release. LMT's client wrapper is an independent TypeScript implementation under MIT.
+> **GPL-3.0 note:** `comictextdetector.pt.onnx` is GPL-3.0 (zyddnys /
+> manga-image-translator). It is never bundled — weights download only when the
+> user explicitly selects that detector, straight from the upstream public
+> release into local cache. LMT's client wrapper (`src/lib/detections/`) is an
+> independent TypeScript implementation under MIT; no upstream code was copied.

@@ -70,7 +70,7 @@
   let ocrError = $state<string | null>(null);
 
   // Inpaint step
-  let enableLamaInpaint = $state(DefaultConfig.inpaintLama);
+  let selectedInpaintMethod = $state<"fast" | "quality">("fast");
   let lamaDownloading = $state(false);
   let lamaDownloaded = $state(false);
   let lamaProgress = $state(0);
@@ -152,7 +152,7 @@
   $effect(() => {
     if (step === "inpaint") {
       checkLamaStatus().then((cached) => {
-        if (enableLamaInpaint && !cached && !lamaDownloading) {
+        if (selectedInpaintMethod === "quality" && !cached && !lamaDownloading) {
           startLamaDownload();
         }
       });
@@ -420,7 +420,7 @@
 
   async function checkLamaStatus(): Promise<boolean> {
     lamaError = null;
-    if (!enableLamaInpaint) {
+    if (selectedInpaintMethod !== "quality") {
       lamaDownloaded = false;
       return false;
     }
@@ -433,7 +433,7 @@
   }
 
   async function startLamaDownload() {
-    if (!enableLamaInpaint) return;
+    if (selectedInpaintMethod !== "quality") return;
     lamaDownloading = true;
     lamaError = null;
     lamaProgress = 0;
@@ -499,7 +499,7 @@
       { key: "sync:detection-model", value: detectionModel },
       { key: "sync:current-mode", value: selectedMode },
       { key: "sync:ocr-engine", value: selectedOcrEngine },
-      { key: "sync:inpaint-lama", value: enableLamaInpaint },
+      { key: "sync:inpaint-method", value: selectedInpaintMethod },
       ...(selectedMode === "gemini" && geminiKey.trim()
         ? ([{ key: "local:gemini-key", value: geminiKey.trim() }] as any)
         : []),
@@ -691,7 +691,7 @@
                 <div
                   class="bg-zinc-100 dark:bg-zinc-800 rounded-xl p-4 text-left w-full space-y-3 border border-zinc-200 dark:border-zinc-700"
                 >
-                  {#each [{ icon: Zap, title: "Private by default", body: "Everything runs on your device. No images or text leave your browser unless you choose otherwise." }, { icon: Cpu, title: "Your hardware, your models", body: "Uses WebLLM and ONNX Runtime to run detection and translation locally." }, { icon: Cloud, title: "Optional cloud mode", body: "Connect your own Gemini API key for higher quality cloud translations." }] as feature}
+                  {#each [{ icon: ShieldCheck, title: "Private by default", body: "Detection never sends images anywhere. Nothing leaves your browser unless you pick Gemini or API Mode; improvement data is opt-in." }, { icon: Cpu, title: "WebGPU - on-device (default)", body: "YOLO26 detection + PaddleOCR + Qwen3 via WebLLM run locally (WebGPU for translation, CPU/WASM for detection/OCR). Offline after download." }, { icon: Cloud, title: "Gemini cloud (opt-in)", body: "Sends the annotated image straight from your browser to the Gemini API. No proxy; key stored locally." }, { icon: Server, title: "API Mode - your server choice", body: "Ollama, LM Studio, or any OpenAI-compatible endpoint. OCR stays local; only extracted text is sent." }] as feature}
                     <div class="flex items-start gap-3">
                       <div
                         class="p-1.5 bg-blue-100 dark:bg-blue-900/30 rounded-lg shrink-0 mt-0.5"
@@ -1602,56 +1602,56 @@
                 </div>
 
                 <div class="space-y-3">
-                  <!-- Default Fast Ladder option -->
+                  <!-- Fast: model-free ladder (default) -->
                   <button
                     type="button"
                     class="w-full text-left p-4 rounded-xl border-2 transition-all cursor-pointer
-                      {!enableLamaInpaint
+                      {selectedInpaintMethod === 'fast'
                       ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
                       : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 hover:border-zinc-300 dark:hover:border-zinc-700'}"
-                    onclick={() => (enableLamaInpaint = false)}
+                    onclick={() => (selectedInpaintMethod = 'fast')}
                   >
                     <div class="flex items-center justify-between mb-1">
-                      <span class="text-sm font-bold {!enableLamaInpaint ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-700 dark:text-zinc-300'}">
-                        Auto Engine Ladder (Recommended)
+                      <span class="text-sm font-bold {selectedInpaintMethod === 'fast' ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-700 dark:text-zinc-300'}">
+                        Fast (Recommended)
                       </span>
                       <span class="text-[10px] font-mono text-zinc-400">0 MB extra</span>
                     </div>
                     <p class="text-xs text-zinc-500 dark:text-zinc-400 leading-snug">
-                      Uses pure mathematical planar fill, bilateral denoise, and Telea fast-marching. Instant, zero extra memory, perfectly cleans flat and JPEG paper.
+                      Model-free ladder per region: planar fill, bilateral denoise, then Telea. Instant, zero extra memory, perfectly cleans flat and JPEG paper.
                     </p>
                   </button>
 
-                  <!-- Optional LaMa Deep Learning model -->
+                  <!-- Quality: standalone LaMa pass with Fast fallback -->
                   <button
                     type="button"
                     class="w-full text-left p-4 rounded-xl border-2 transition-all cursor-pointer
-                      {enableLamaInpaint
+                      {selectedInpaintMethod === 'quality'
                       ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
                       : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 hover:border-zinc-300 dark:hover:border-zinc-700'}"
-                    onclick={() => (enableLamaInpaint = true)}
+                    onclick={() => (selectedInpaintMethod = 'quality')}
                   >
                     <div class="flex items-center justify-between mb-1">
                       <div class="flex items-center gap-1.5">
-                        <span class="text-sm font-bold {enableLamaInpaint ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-700 dark:text-zinc-300'}">
-                          Enable LaMa Redraw Model
+                        <span class="text-sm font-bold {selectedInpaintMethod === 'quality' ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-700 dark:text-zinc-300'}">
+                          Quality
                         </span>
                         <span class="text-[9px] font-semibold px-1.5 py-0.2 rounded bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
-                          Deep Learning
+                          LaMa redraw
                         </span>
                       </div>
                       <span class="text-[10px] font-mono text-zinc-400">~207 MB</span>
                     </div>
                     <p class="text-xs text-zinc-500 dark:text-zinc-400 leading-snug">
-                      Finetuned neural inpainter that reconstructs screentone, halftone, and art textures behind text.
+                      Finetuned neural inpainter that reconstructs screentone, halftone, and art textures behind text. Regions LaMa declines fall back into Fast automatically.
                     </p>
-                    {#if enableLamaInpaint}
+                    {#if selectedInpaintMethod === 'quality'}
                       <div class="mt-2.5 p-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-amber-800 dark:text-amber-300 text-xs leading-snug">
                         <strong>Drawbacks &amp; Trade-offs:</strong>
                         <ul class="list-disc list-inside mt-1 space-y-0.5 text-[11px]">
                           <li>Requires downloading ~207 MB weights on first clean.</li>
                           <li>Higher memory footprint (~500 MB RAM/VRAM).</li>
-                          <li>Inference takes ~1-2 seconds per complex region.</li>
+                          <li>Slower inference (~30–60 seconds per complex region on CPU).</li>
                         </ul>
                       </div>
                     {/if}
@@ -1659,7 +1659,7 @@
                 </div>
 
                 <!-- Inpaint / LaMa Cache & Download Status Card -->
-                {#if enableLamaInpaint}
+                {#if selectedInpaintMethod === 'quality'}
                   <div
                     class="flex flex-col gap-2 p-3.5 rounded-xl border transition-colors
                       {lamaDownloaded
@@ -1743,7 +1743,7 @@
                   </button>
                   <button
                     onclick={finishSetup}
-                    disabled={enableLamaInpaint && (!lamaDownloaded || lamaDownloading)}
+                    disabled={selectedInpaintMethod === 'quality' && (!lamaDownloaded || lamaDownloading)}
                     class="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white shadow-md shadow-blue-600/20 font-bold py-2.5 px-4 rounded-xl transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
                   >
                     {#if lamaDownloading}

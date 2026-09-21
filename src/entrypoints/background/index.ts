@@ -170,10 +170,17 @@ export default defineBackground(() => {
         msg.type,
       )
     ) {
+      // Quality (LaMa) runs on wasm CPU (~30s+ per 512px tile), so a Quality
+      // inpaint over N regions needs a per-region budget, not a flat page budget.
+      const inpaintBoxes = Array.isArray(msg.data?.bboxes)
+        ? msg.data.bboxes.length
+        : 0;
       const timeoutMs =
-        msg.type === "TRANSLATE_IMAGE" || msg.type === "INPAINT_IMAGE"
-          ? 180_000
-          : 90_000;
+        msg.type === "INPAINT_IMAGE" && msg.data?.method === "quality"
+          ? Math.max(300_000, inpaintBoxes * 60_000)
+          : msg.type === "TRANSLATE_IMAGE" || msg.type === "INPAINT_IMAGE"
+            ? 180_000
+            : 90_000;
 
       const forward = () =>
         browser.runtime.sendMessage({

@@ -8,7 +8,7 @@ import {
   type Mask,
 } from "./mask";
 import { pageNoiseSigma, sobelMagnitude, strongEdgeFloor, toLuma } from "./noise";
-import { fitMask, type Route } from "./fit";
+import { fitMask, type Fitted, type Route } from "./fit";
 import { renderFill } from "./fill";
 import { renderDenoise } from "./denoise";
 import { renderLama } from "./lama";
@@ -26,9 +26,15 @@ import {
  * pixels for one patch covering the mask's bounds, everything outside copied
  * through.
  *
- * Rungs: 0 planar fill, 1 denoise, 2 LaMa redraw (opt-in), 3 Telea fast-marching.
- * A rung's output is scored by the ONE decline metric; a declined attempt is
- * rolled back and the region climbs.
+ * Two paths share the seed/fit machinery:
+ * - Fast (`inpaintImageAuto`): rungs 0 planar fill, 1 denoise, 3 Telea
+ *   fast-marching. No model, no downloads. The default.
+ * - Quality (`inpaintImageQuality`): a standalone LaMa-first pass over the
+ *   fitted `ink` hole; a region LaMa declines or fails falls back into the
+ *   Fast ladder. Fully decoupled from the rung ladder.
+ *
+ * Every attempt is scored by the ONE decline metric; a declined attempt is
+ * rolled back and the region climbs (or falls back).
  */
 
 export interface InpaintRegionResult {
@@ -46,15 +52,66 @@ export interface InpaintAutoResult {
 }
 
 export interface InpaintAutoOptions {
-  useLama?: boolean;
   segmentation?: Uint8Array | null;
 }
 
-export async function inpaintImageAuto(
-  imageSrc: string,
-  bboxes: Bbox[],
-  options?: InpaintAutoOptions,
-): Promise<InpaintAutoResult> {
+interface PageRect {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+interface Attempt {
+  method: InpaintRegionResult["method"];
+  mask: Mask;
+  render: () => Promise<boolean | void> | void;
+}
+
+type PreparedRegion =
+  | { kind: "skipped"; index: number }
+  | {
+      kind: "rect";
+      index: number;
+      ms: () => number;
+      otherRects: PageRect[];
+      rect: Mask;
+      cropRgb: Uint8ClampedArray;
+    }
+  | {
+      kind: "fitted";
+      index: number;
+      ms: () => number;
+      otherRects: PageRect[];
+      fitted: Fitted;
+      cropRgb: Uint8ClampedArray;
+    };
+
+/**
+ * Stored method values normalize forward: only "quality" selects the LaMa
+ * path — every legacy value ("auto", "telea", old edge-blend "fast") is Fast.
+ */
+export function normalizeInpaintMethod(value: unknown): "fast" | "quality" {
+  return value === "quality" ? "quality" : "fast";
+}
+
+/**
+ * Fast attempt plan per route. LaMa is never a Fast rung —
+ * see inpaintImageQuality for the decoupled model path.
+ */
+export function planFastMethods(
+  route: Route,
+): ("fill" | "denoise" | "telea")[] {
+  if (route === "fill") return ["fill", "denoise", "telea"];
+  if (route === "denoise") return ["denoise", "telea"];
+  return ["telea"];
+}
+
+async function openPage(imageSrc: string): Promise<{
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  page: ImageData;
+}> {
   const bitmap = await fetchAsImageBitmap(imageSrc);
   const canvas = document.createElement("canvas");
   canvas.width = bitmap.width;
@@ -64,24 +121,249 @@ export async function inpaintImageAuto(
   bitmap.close();
 
   const page = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  return { canvas, ctx, page };
+}
+
+function pageStats(page: ImageData): {
+  strongFloor: number;
+  noiseSigma: number;
+} {
+  const lumaPage = new Float32Array(page.width * page.height);
+  toLuma(page.data, lumaPage);
+  return {
+    strongFloor: strongEdgeFloor(lumaPage, page.width, page.height),
+    noiseSigma: pageNoiseSigma(lumaPage, page.width, page.height),
+  };
+}
+
+/**
+ * Shared region prep for both paths: crop, seed (segmentation mask when the
+ * comic-text-detector is active, else the percentile heuristic), fit.
+ */
+function prepareRegion(
+  page: ImageData,
+  strongFloor: number,
+  noiseSigma: number,
+  bboxes: Bbox[],
+  i: number,
+  segmentation?: Uint8Array | null,
+): PreparedRegion {
   const pw = page.width;
   const ph = page.height;
+  const t0 = performance.now();
+  const ms = () => Math.round(performance.now() - t0);
+  const bbox = bboxes[i];
+  const rx1 = Math.max(0, Math.round(bbox.x1));
+  const ry1 = Math.max(0, Math.round(bbox.y1));
+  const rx2 = Math.min(pw - 1, Math.round(bbox.x2));
+  const ry2 = Math.min(ph - 1, Math.round(bbox.y2));
+  if (rx2 - rx1 < 4 || ry2 - ry1 < 4) {
+    return { kind: "skipped", index: i };
+  }
 
-  const lumaPage = new Float32Array(pw * ph);
-  toLuma(page.data, lumaPage);
-  const strongFloor = strongEdgeFloor(lumaPage, pw, ph);
-  const noiseSigma = pageNoiseSigma(lumaPage, pw, ph);
+  const cx0 = Math.max(0, rx1 - CROP_MARGIN);
+  const cy0 = Math.max(0, ry1 - CROP_MARGIN);
+  const cx1 = Math.min(pw - 1, rx2 + CROP_MARGIN);
+  const cy1 = Math.min(ph - 1, ry2 + CROP_MARGIN);
+  const cw = cx1 - cx0 + 1;
+  const ch = cy1 - cy0 + 1;
+
+  const cropRgb = new Uint8ClampedArray(cw * ch * 4);
+  for (let y = 0; y < ch; y++) {
+    const src = ((cy0 + y) * pw + cx0) * 4;
+    cropRgb.set(page.data.subarray(src, src + cw * 4), y * cw * 4);
+  }
+  const cropLuma = new Float32Array(cw * ch);
+  toLuma(cropRgb, cropLuma);
+  const mag = sobelMagnitude(cropLuma, cw, ch);
+
+  const otherRects = bboxes
+    .map((b) => ({
+      x1: Math.round(b.x1),
+      y1: Math.round(b.y1),
+      x2: Math.round(b.x2),
+      y2: Math.round(b.y2),
+    }))
+    .filter((_, j) => j !== i);
+
+  const seedBox = {
+    x1: rx1 - cx0,
+    y1: ry1 - cy0,
+    x2: rx2 - cx0,
+    y2: ry2 - cy0,
+  };
+  let seed = segmentation
+    ? buildSegmentationSeed(segmentation, pw, ph, cw, ch, cx0, cy0, seedBox)
+    : buildInkSeed(cropLuma, cw, ch, cx0, cy0, seedBox);
+
+  if (maskCount(seed) < 3 && segmentation) {
+    seed = buildInkSeed(cropLuma, cw, ch, cx0, cy0, seedBox);
+  }
+
+  if (maskCount(seed) < 3) {
+    return {
+      kind: "rect",
+      index: i,
+      ms,
+      otherRects,
+      rect: rectMask(cw, ch, cx0, cy0, rx1, ry1, rx2, ry2),
+      cropRgb,
+    };
+  }
+
+  return {
+    kind: "fitted",
+    index: i,
+    ms,
+    otherRects,
+    fitted: fitMask(seed, cropLuma, cropRgb, mag, strongFloor, noiseSigma),
+    cropRgb,
+  };
+}
+
+/** Fast attempt list for a fitted region, in cost order. */
+function fastAttempts(
+  page: ImageData,
+  fitted: Fitted,
+  cropRgb: Uint8ClampedArray,
+  noiseSigma: number,
+): Attempt[] {
+  const denoiseApplied = dilate(
+    fitted.mask,
+    DENOISE_DILATION + DENOISE_FEATHER,
+  );
+  const teleaAttempt: Attempt = {
+    method: "telea",
+    mask: fitted.mask,
+    render: () => runTelea(page, fitted.mask, cropRgb),
+  };
+  if (fitted.route === "fill") {
+    return [
+      {
+        method: "fill",
+        mask: fitted.mask,
+        render: () => renderFill(page, fitted.mask, fitted),
+      },
+      {
+        method: "denoise",
+        mask: denoiseApplied,
+        render: () =>
+          renderDenoise(page, fitted.mask, fitted, noiseSigma),
+      },
+      teleaAttempt,
+    ];
+  }
+  if (fitted.route === "denoise") {
+    return [
+      {
+        method: "denoise",
+        mask: denoiseApplied,
+        render: () =>
+          renderDenoise(page, fitted.mask, fitted, noiseSigma),
+      },
+      teleaAttempt,
+    ];
+  }
+  return [teleaAttempt];
+}
+
+function lamaAttemptFor(page: ImageData, fitted: Fitted): Attempt {
+  return {
+    method: "lama",
+    mask: dilate(fitted.ink, ISOLATION_RADIUS),
+    render: async () => await renderLama(page, fitted),
+  };
+}
+
+async function runAttempts(
+  page: ImageData,
+  index: number,
+  attempts: Attempt[],
+  noiseSigma: number,
+  otherRects: PageRect[],
+): Promise<{
+  done: InpaintRegionResult["method"];
+  lamaError: string | null;
+}> {
+  let done: InpaintRegionResult["method"] = "declined";
+  let lamaError: string | null = null;
+  for (const attempt of attempts) {
+    const ok = await runRung(page, attempt.mask, attempt.render, () =>
+      regionDeclines(page, attempt.mask, noiseSigma, otherRects),
+    );
+    if (ok) {
+      done = attempt.method;
+      break;
+    }
+    if (attempt.method === "lama") {
+      lamaError = getLastLamaError();
+      if (lamaError) {
+        console.warn(`LMT: LaMa declined region ${index}:`, lamaError);
+      }
+    }
+  }
+  return { done, lamaError };
+}
+
+function fittedProvenance(
+  fitted: Fitted,
+): Pick<InpaintRegionResult, "route" | "deviation" | "thickness"> {
+  return {
+    route: fitted.route,
+    deviation: Math.round(fitted.ring.deviation * 100) / 100,
+    thickness: fitted.thickness,
+  };
+}
+
+async function paintRectFallback(
+  page: ImageData,
+  prep: Extract<PreparedRegion, { kind: "rect" }>,
+  noiseSigma: number,
+): Promise<InpaintRegionResult> {
+  // No usable ink: rectangle Telea on the bbox, still decline-gated.
+  const { rect, cropRgb, otherRects, index, ms } = prep;
+  const ok = await runRung(
+    page,
+    rect,
+    () => runTelea(page, rect, cropRgb),
+    () => regionDeclines(page, rect, noiseSigma, otherRects),
+  );
+  return {
+    index,
+    method: ok ? "rect-telea" : "declined",
+    route: "rect",
+    deviation: 999,
+    thickness: 0,
+    ms: ms(),
+  };
+}
+
+/**
+ * Fast path (default): per-region fitted mask through the model-free ladder
+ * (planar fill → bilateral denoise → crop-local Telea), each rung
+ * decline-gated with snapshot/rollback. A region nothing can clean is left
+ * exactly as it was and reported.
+ */
+export async function inpaintImageAuto(
+  imageSrc: string,
+  bboxes: Bbox[],
+  options?: InpaintAutoOptions,
+): Promise<InpaintAutoResult> {
+  const { canvas, ctx, page } = await openPage(imageSrc);
+  const { strongFloor, noiseSigma } = pageStats(page);
 
   const regions: InpaintRegionResult[] = [];
 
   for (let i = 0; i < bboxes.length; i++) {
-    const t0 = performance.now();
-    const bbox = bboxes[i];
-    const rx1 = Math.max(0, Math.round(bbox.x1));
-    const ry1 = Math.max(0, Math.round(bbox.y1));
-    const rx2 = Math.min(pw - 1, Math.round(bbox.x2));
-    const ry2 = Math.min(ph - 1, Math.round(bbox.y2));
-    if (rx2 - rx1 < 4 || ry2 - ry1 < 4) {
+    const prep = prepareRegion(
+      page,
+      strongFloor,
+      noiseSigma,
+      bboxes,
+      i,
+      options?.segmentation,
+    );
+    if (prep.kind === "skipped") {
       regions.push({
         index: i,
         method: "skipped",
@@ -92,140 +374,106 @@ export async function inpaintImageAuto(
       });
       continue;
     }
-
-    const cx0 = Math.max(0, rx1 - CROP_MARGIN);
-    const cy0 = Math.max(0, ry1 - CROP_MARGIN);
-    const cx1 = Math.min(pw - 1, rx2 + CROP_MARGIN);
-    const cy1 = Math.min(ph - 1, ry2 + CROP_MARGIN);
-    const cw = cx1 - cx0 + 1;
-    const ch = cy1 - cy0 + 1;
-
-    const cropRgb = new Uint8ClampedArray(cw * ch * 4);
-    for (let y = 0; y < ch; y++) {
-      const src = ((cy0 + y) * pw + cx0) * 4;
-      cropRgb.set(page.data.subarray(src, src + cw * 4), y * cw * 4);
+    if (prep.kind === "rect") {
+      regions.push(await paintRectFallback(page, prep, noiseSigma));
+      continue;
     }
-    const cropLuma = new Float32Array(cw * ch);
-    toLuma(cropRgb, cropLuma);
-    const mag = sobelMagnitude(cropLuma, cw, ch);
 
-    const otherRects = bboxes
-      .map((b) => ({
-        x1: Math.round(b.x1),
-        y1: Math.round(b.y1),
-        x2: Math.round(b.x2),
-        y2: Math.round(b.y2),
-      }))
-      .filter((_, j) => j !== i);
+    const { fitted, cropRgb, otherRects, ms } = prep;
+    const { done, lamaError } = await runAttempts(
+      page,
+      i,
+      fastAttempts(page, fitted, cropRgb, noiseSigma),
+      noiseSigma,
+      otherRects,
+    );
+    regions.push({
+      index: i,
+      method: done,
+      ...fittedProvenance(fitted),
+      ms: ms(),
+      lamaError,
+    });
+  }
 
-    const seedBox = {
-      x1: rx1 - cx0,
-      y1: ry1 - cy0,
-      x2: rx2 - cx0,
-      y2: ry2 - cy0,
-    };
-    let seed = options?.segmentation
-      ? buildSegmentationSeed(options.segmentation, pw, ph, cw, ch, cx0, cy0, seedBox)
-      : buildInkSeed(cropLuma, cw, ch, cx0, cy0, seedBox);
+  ctx.putImageData(page, 0, 0);
+  return { url: canvas.toDataURL("image/png"), regions };
+}
 
-    if (maskCount(seed) < 3 && options?.segmentation) {
-      seed = buildInkSeed(cropLuma, cw, ch, cx0, cy0, seedBox);
-    }
-    const seedCount = maskCount(seed);
+/**
+ * Quality path: a standalone LaMa-first pass per region over the fitted `ink`
+ * hole — decoupled from the Fast rung ladder. A region LaMa declines or fails
+ * falls back into the Fast ladder, so Quality is a strict superset of Fast;
+ * provenance records whichever rung actually shipped (`lama` or the fallback
+ * rung) plus the LaMa failure reason when one was attempted.
+ */
+export async function inpaintImageQuality(
+  imageSrc: string,
+  bboxes: Bbox[],
+  options?: InpaintAutoOptions,
+): Promise<InpaintAutoResult> {
+  const { canvas, ctx, page } = await openPage(imageSrc);
+  const { strongFloor, noiseSigma } = pageStats(page);
 
-    const ms = () => Math.round(performance.now() - t0);
+  const regions: InpaintRegionResult[] = [];
 
-    if (seedCount < 3) {
-      // No usable ink: legacy rectangle Telea on the bbox, still decline-gated.
-      const rect = rectMask(cw, ch, cx0, cy0, rx1, ry1, rx2, ry2);
-      const ok = await runRung(
-        page,
-        rect,
-        () => runTelea(page, rect, cropRgb),
-        () => regionDeclines(page, rect, noiseSigma, otherRects),
-      );
+  for (let i = 0; i < bboxes.length; i++) {
+    const prep = prepareRegion(
+      page,
+      strongFloor,
+      noiseSigma,
+      bboxes,
+      i,
+      options?.segmentation,
+    );
+    if (prep.kind === "skipped") {
       regions.push({
         index: i,
-        method: ok ? "rect-telea" : "declined",
+        method: "skipped",
         route: "rect",
-        deviation: 999,
+        deviation: 0,
         thickness: 0,
+        ms: 0,
+      });
+      continue;
+    }
+    if (prep.kind === "rect") {
+      regions.push(await paintRectFallback(page, prep, noiseSigma));
+      continue;
+    }
+
+    const { fitted, cropRgb, otherRects, ms } = prep;
+    const first = await runAttempts(
+      page,
+      i,
+      [lamaAttemptFor(page, fitted)],
+      noiseSigma,
+      otherRects,
+    );
+    if (first.done === "lama") {
+      regions.push({
+        index: i,
+        method: "lama",
+        ...fittedProvenance(fitted),
         ms: ms(),
+        lamaError: null,
       });
       continue;
     }
 
-    const fitted = fitMask(seed, cropLuma, cropRgb, mag, strongFloor, noiseSigma);
-
-    const attempts: {
-      method: InpaintRegionResult["method"];
-      mask: Mask;
-      render: () => Promise<boolean | void> | void;
-    }[] = [];
-    const denoiseApplied = dilate(fitted.mask, DENOISE_DILATION + DENOISE_FEATHER);
-    const teleaAttempt = {
-      method: "telea" as const,
-      mask: fitted.mask,
-      render: () => runTelea(page, fitted.mask, cropRgb),
-    };
-    const lamaAttempt = options?.useLama
-      ? {
-          method: "lama" as const,
-          mask: dilate(fitted.ink, ISOLATION_RADIUS),
-          render: async () => await renderLama(page, fitted),
-        }
-      : null;
-
-    if (fitted.route === "fill") {
-      attempts.push(
-        {
-          method: "fill",
-          mask: fitted.mask,
-          render: () => renderFill(page, fitted.mask, fitted),
-        },
-        {
-          method: "denoise",
-          mask: denoiseApplied,
-          render: () =>
-            renderDenoise(page, fitted.mask, fitted, noiseSigma),
-        },
-      );
-      if (lamaAttempt) attempts.push(lamaAttempt);
-      attempts.push(teleaAttempt);
-    } else if (fitted.route === "denoise") {
-      attempts.push(
-        {
-          method: "denoise",
-          mask: denoiseApplied,
-          render: () =>
-            renderDenoise(page, fitted.mask, fitted, noiseSigma),
-        },
-      );
-      if (lamaAttempt) attempts.push(lamaAttempt);
-      attempts.push(teleaAttempt);
-    } else {
-      if (lamaAttempt) attempts.push(lamaAttempt);
-      attempts.push(teleaAttempt);
-    }
-
-    let done: InpaintRegionResult["method"] = "declined";
-    for (const attempt of attempts) {
-      const ok = await runRung(page, attempt.mask, attempt.render, () =>
-        regionDeclines(page, attempt.mask, noiseSigma, otherRects),
-      );
-      if (ok) {
-        done = attempt.method;
-        break;
-      }
-    }
-
+    const fellBack = await runAttempts(
+      page,
+      i,
+      fastAttempts(page, fitted, cropRgb, noiseSigma),
+      noiseSigma,
+      otherRects,
+    );
     regions.push({
       index: i,
-      method: done,
-      route: fitted.route,
-      deviation: Math.round(fitted.ring.deviation * 100) / 100,
-      thickness: fitted.thickness,
+      method: fellBack.done,
+      ...fittedProvenance(fitted),
       ms: ms(),
+      lamaError: first.lamaError,
     });
   }
 

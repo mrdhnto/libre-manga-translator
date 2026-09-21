@@ -1,6 +1,9 @@
 import { env } from "@/lib/env";
 import { fetchAsImageBitmap } from "@/lib/utils";
-import type { InpaintRegionResult } from "@/lib/inpaint/ladder";
+import {
+  normalizeInpaintMethod,
+  type InpaintRegionResult,
+} from "@/lib/inpaint/ladder";
 
 // Encode an <img> element to a JPEG data URL from the PAGE context at FULL natural size.
 
@@ -231,9 +234,8 @@ async function drawFittedText(
 }
 
 /**
- * Local pixel-buffer inpainting fallback (used when offscreen Telea fails or
- * user selects "fast" mode).
- * Uses a crude edge-sample gradient blend.
+ * Local pixel-buffer inpainting fallback (used when offscreen inpainting fails
+ * or times out). Uses a crude edge-sample gradient blend. Never user-selectable.
  */
 async function inpaintLocal(
   imageSrc: string,
@@ -259,33 +261,28 @@ async function inpaintLocal(
 /**
  * Request inpainting from the offscreen document.
  * Method selection is user-configurable via `sync:inpaint-method`:
- *   "auto"   → engine ladder: per-region fitted mask, planar fill -> denoise
- *              -> Telea, each rung decline-gated (Beta4 default).
- *   "telea"  → legacy full-frame Telea fast-marching (quality, slow on big pages)
- *   "fast"   → local edge-blend directly (quick, cruder)
- * Falls back to local pixel-buffer inpainting if offscreen fails or times out.
- * Returns the inpainted data URL, which pipeline produced it ("auto" |
- * "telea" | "fast" | "fallback"), and per-region provenance for "auto".
+ *   "fast"    → model-free ladder: per-region fitted mask, planar fill ->
+ *              denoise -> Telea, each rung decline-gated (default).
+ *   "quality" → standalone LaMa-first pass per region, falling back into the
+ *              Fast ladder where LaMa declines (slower, ~207 MB download).
+ * Legacy stored values ("auto", "telea", old edge-blend "fast") all read as
+ * "fast". Falls back to local pixel-buffer inpainting if offscreen fails or
+ * times out. Returns the inpainted data URL, which pipeline produced it
+ * ("fast" | "quality" | "fallback"), and per-region provenance.
  */
 export async function inpaintImage(
   imageSrc: string,
   bboxes: Bbox[],
-  radius = 3,
 ): Promise<{
   url: string;
-  method: "auto" | "telea" | "fast" | "fallback";
+  method: "fast" | "quality" | "fallback";
   regions?: InpaintRegionResult[];
   error?: string;
 }> {
-  const method =
-    (await storage.getItem<string>("sync:inpaint-method")) ?? "auto";
-  const useLama =
-    (await storage.getItem<boolean>("sync:inpaint-lama")) ?? false;
-
-  if (method === "fast") {
-    const url = await inpaintLocal(imageSrc, bboxes);
-    return { url, method: "fast" };
-  }
+  const method = normalizeInpaintMethod(
+    await storage.getItem<string>("sync:inpaint-method"),
+  );
+  const isQuality = method === "quality";
 
   // Offscreen paths - but don't hang forever
   const timeout = (ms: number) =>
@@ -294,26 +291,26 @@ export async function inpaintImage(
     );
 
   try {
+    const timeoutMs = isQuality
+      ? Math.max(120_000, bboxes.length * 50_000)
+      : 30_000;
+
     const response = await Promise.race([
       browser.runtime.sendMessage({
         type: "INPAINT_IMAGE",
-        data: { src: imageSrc, bboxes, radius, method, useLama },
+        data: { src: imageSrc, bboxes, method },
       }),
       timeout(useLama ? 60_000 : 30_000),
     ]);
 
     if (response?.error) throw new Error(response.error);
 
-    if (method === "auto") {
-      const result = response as {
-        url?: string;
-        regions?: InpaintRegionResult[];
-      };
-      if (!result?.url) throw new Error("auto inpaint returned no image");
-      return { url: result.url, method: "auto", regions: result.regions };
-    }
-
-    return { url: response as string, method: "telea" };
+    const result = response as {
+      url?: string;
+      regions?: InpaintRegionResult[];
+    };
+    if (!result?.url) throw new Error("inpaint returned no image");
+    return { url: result.url, method, regions: result.regions };
   } catch (err) {
     const message = (err as Error).message;
     console.warn(

@@ -4,27 +4,20 @@
 
   let {
     inpaintMethod = $bindable(DefaultConfig.inpaintMethod),
-    inpaintLama = $bindable(DefaultConfig.inpaintLama),
   }: {
     inpaintMethod: string;
-    inpaintLama?: boolean;
   } = $props();
 
   const OPTIONS = [
     {
-      id: "auto",
-      label: "Auto",
+      id: "fast",
+      label: "Fast",
       desc: "Recommended",
     },
     {
-      id: "telea",
-      label: "Telea",
-      desc: "Legacy quality",
-    },
-    {
-      id: "fast",
-      label: "Fast",
-      desc: "Compatible",
+      id: "quality",
+      label: "Quality",
+      desc: "LaMa redraw · ~207 MB · slower",
     },
   ];
 </script>
@@ -51,38 +44,9 @@
       {/each}
     </div>
 
-    {#if inpaintMethod === "auto"}
-      <div class="mt-4 pt-3 border-t border-zinc-200 dark:border-zinc-800">
-        <div class="flex justify-between items-center gap-2">
-          <div>
-            <div class="flex items-center gap-1.5">
-              <span class="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-                LaMa Redraw Model
-              </span>
-              <span class="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 font-mono">
-                ~207 MB
-              </span>
-            </div>
-            <p class="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5 leading-snug">
-              Deep-learning redraw rung for complex screentone, halftone, and art behind text.
-            </p>
-          </div>
-          <label class="relative inline-flex items-center cursor-pointer shrink-0">
-            <input
-              type="checkbox"
-              bind:checked={inpaintLama}
-              class="sr-only peer"
-            />
-            <div
-              class="w-9 h-5 bg-zinc-200 dark:bg-zinc-700 rounded-full peer peer-checked:bg-blue-500 transition-all after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4"
-            ></div>
-          </label>
-        </div>
-        {#if inpaintLama}
-          <div class="mt-2 p-2 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800/30 rounded-lg text-blue-700 dark:text-blue-400 text-[10px] leading-snug">
-            <strong>Trade-off:</strong> Requires one-time ~207 MB model download and ~500 MB RAM/VRAM. Slightly slower inference (~1-2s per complex region), but avoids flat patches or smudges on screentoned backgrounds.
-          </div>
-        {/if}
+    {#if inpaintMethod === "quality"}
+      <div class="mt-3 p-2 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800/30 rounded-lg text-blue-700 dark:text-blue-400 text-[10px] leading-snug">
+        <strong>Trade-off:</strong> Requires one-time ~207 MB model download and ~500 MB RAM/VRAM. Slower inference (~30–60s per complex region on CPU), but reconstructs screentone, halftone, and art behind text. Regions LaMa declines fall back into Fast automatically.
       </div>
     {/if}
 
@@ -91,12 +55,10 @@
     >
       <Info size={12} class="shrink-0 mt-0.5" />
       <p class="text-[10px] leading-snug">
-        <strong>Auto</strong> fits a text-shaped mask per region and uses the
-        lightest inpainting engine that passes quality (samples the paper,
-        escalates only when needed). <strong>Telea</strong> uses fast-marching
-        inpainting on the whole box (better on complex backgrounds, slower on
-        large images). <strong>Fast</strong> uses the legacy edge-blend
-        (quicker, cruder).
+        <strong>Fast</strong> fits a text-shaped mask per region and uses the
+        lightest engine that passes quality (planar fill, denoise, then Telea).
+        <strong>Quality</strong> runs the LaMa redraw model first per region and
+        falls back into Fast where LaMa declines.
       </p>
     </div>
   </div>
