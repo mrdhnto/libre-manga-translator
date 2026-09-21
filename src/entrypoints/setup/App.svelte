@@ -357,10 +357,27 @@
         (await isArtifactCached(DefaultConfig.mangaOcrRepo, "encoder_model.onnx")) &&
         (await isArtifactCached(DefaultConfig.mangaOcrRepo, "decoder_model.onnx"));
     } else {
-      cached = await isArtifactCached(
-        DefaultConfig.ocrRepo,
-        DefaultConfig.ocrModelPath("chinese"),
-      );
+      // First-run ships Latin + Chinese/Japanese packs so the Auto-Detect
+      // gate can switch between them without downloading mid-translate.
+      const [latinRec, latinDict, chineseRec, chineseDict] = await Promise.all([
+        isArtifactCached(
+          DefaultConfig.ocrRepo,
+          DefaultConfig.ocrModelPath("latin"),
+        ),
+        isArtifactCached(
+          DefaultConfig.ocrRepo,
+          DefaultConfig.ocrDictPath("latin"),
+        ),
+        isArtifactCached(
+          DefaultConfig.ocrRepo,
+          DefaultConfig.ocrModelPath("chinese"),
+        ),
+        isArtifactCached(
+          DefaultConfig.ocrRepo,
+          DefaultConfig.ocrDictPath("chinese"),
+        ),
+      ]);
+      cached = latinRec && latinDict && chineseRec && chineseDict;
     }
     ocrDownloaded = cached;
     return cached;
@@ -395,18 +412,33 @@
         );
         await fetchAndCacheWithProgress(DefaultConfig.mangaOcrRepo, "vocab.txt");
       } else {
+        const packProgress = (step: number, steps: number) => (loaded: number, total: number) => {
+          const base = ((step - 1) / steps) * 100;
+          const pct = total > 0 ? Math.round((loaded / total) * (100 / steps)) : 0;
+          ocrProgress = Math.min(100, Math.round(base + pct));
+          ocrProgressText = `Pack ${step}/${steps}: ${(loaded / 1024 / 1024).toFixed(1)} MB${total > 0 ? ` / ${(total / 1024 / 1024).toFixed(1)} MB` : ""}`;
+        };
+        // Latin first (Auto-Detect default), then Chinese/Japanese — the gate
+        // switches between them without mid-translate downloads.
+        await fetchAndCacheWithProgress(
+          DefaultConfig.ocrRepo,
+          DefaultConfig.ocrModelPath("latin"),
+          packProgress(1, 4),
+        );
+        await fetchAndCacheWithProgress(
+          DefaultConfig.ocrRepo,
+          DefaultConfig.ocrDictPath("latin"),
+          packProgress(2, 4),
+        );
         await fetchAndCacheWithProgress(
           DefaultConfig.ocrRepo,
           DefaultConfig.ocrModelPath("chinese"),
-          (loaded, total) => {
-            const pct = total > 0 ? Math.round((loaded / total) * 100) : 0;
-            ocrProgress = pct;
-            ocrProgressText = `${(loaded / 1024 / 1024).toFixed(1)} MB${total > 0 ? ` / ${(total / 1024 / 1024).toFixed(1)} MB` : ""}`;
-          },
+          packProgress(3, 4),
         );
         await fetchAndCacheWithProgress(
           DefaultConfig.ocrRepo,
           DefaultConfig.ocrDictPath("chinese"),
+          packProgress(4, 4),
         );
       }
       ocrDownloaded = true;
@@ -1473,10 +1505,10 @@
                       <span class="text-sm font-bold {selectedOcrEngine === 'paddle' ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-700 dark:text-zinc-300'}">
                         PaddleOCR
                       </span>
-                      <span class="text-[10px] font-mono text-zinc-400">~80 MB</span>
+                      <span class="text-[10px] font-mono text-zinc-400">~90 MB</span>
                     </div>
                     <p class="text-xs text-zinc-500 dark:text-zinc-400 leading-snug">
-                      Fast multilingual engine (default). Supports Japanese, Chinese, Korean, English, and more.
+                      Fast multilingual engine (default). Ships Latin + Chinese/Japanese packs — other languages download on first use.
                     </p>
                   </button>
 

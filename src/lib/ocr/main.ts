@@ -6,7 +6,7 @@ import {
   sliceImageDataIntoLines,
 } from "./utils";
 import { fetchAsImageBitmap } from "../utils";
-import { DefaultConfig } from "../configs";
+import { DefaultConfig, resolveLangGroup } from "../configs";
 import {
   groupForLabel,
   majorityLabel,
@@ -92,10 +92,18 @@ export async function textRecognise(
       verdicts.filter((v): v is RegionVerdict => v !== null),
     );
   }
-  langGroup =
-    groupForLabel(pageLabel) ??
-    DefaultConfig.ocrLangGroupMap[sourceLang] ??
-    "latin";
+  const gateGroup = mode === "auto" && gateLoaded ? groupForLabel(pageLabel) : null;
+  if (gateGroup) {
+    langGroup = gateGroup;
+  } else {
+    const resolved = resolveLangGroup(sourceLang);
+    langGroup = resolved.group;
+    if (resolved.fellBack) {
+      console.warn(
+        `[ocr] "${sourceLang}" has no dedicated rec model — using languages/${langGroup}/rec.onnx`,
+      );
+    }
+  }
 
   // Pre-filter: a CONFIDENT, TRUSTED wrong-script refusal never gets read
   const gateSkip: (GateReason | null)[] = new Array(bboxes.length).fill(null);

@@ -39,6 +39,17 @@
     items.reduce((acc, item) => acc + (item.size || 0), 0),
   );
 
+  /**
+   * PaddleOCR rec/dict URLs look like
+   * `…/resolve/main/languages/<group>/rec.onnx` — the parent folder is the
+   * language group the pack represents. Returns it, or null so the template
+   * can fall back to the model name for non-PaddleOCR items.
+   */
+  function getLangBadge(item: CachedModelItem): string | null {
+    const match = item.url.match(/languages\/([^/]+)\//);
+    return match ? match[1] : null;
+  }
+
   async function loadCachedModels() {
     loading = true;
     try {
@@ -202,25 +213,40 @@
           No model weights currently stored in local browser cache.
         </div>
       {:else}
-        <div class="space-y-2 max-h-72 overflow-y-auto pr-1">
+        <div class="space-y-2 max-h-72 overflow-y-auto custom-scrollbar pr-1">
           {#each items as item}
             <div
               class="flex items-center justify-between p-2.5 rounded-lg border border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs shadow-xs"
             >
               <div class="min-w-0 pr-2">
                 <div class="flex items-center gap-1.5">
+                  <span class="font-medium text-zinc-800 dark:text-zinc-200 truncate">
+                    {item.name}
+                  </span>
+                </div>
+                <div class="text-[10px] font-mono text-zinc-400 mt-0.5">
                   <span
                     class="text-[9px] font-semibold px-1.5 py-0.2 rounded {categoryBadgeClasses[item.category] ?? categoryBadgeClasses.Other}"
                   >
                     {item.category}
                   </span>
-                  <span class="font-medium text-zinc-800 dark:text-zinc-200 truncate">
-                    {item.name}
-                  </span>
-                </div>
-                <p class="text-[10px] font-mono text-zinc-400 mt-0.5">
+                  <!-- parent folder name (eg. language, ocr name as fallback) -->
+                  {#if getLangBadge(item)}
+                    <span
+                      class="text-[9px] font-semibold px-1.5 py-0.2 rounded bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300"
+                      title="PaddleOCR language group"
+                    >
+                      {getLangBadge(item)}
+                    </span>
+                  {:else}
+                    <span
+                      class="text-[9px] font-semibold px-1.5 py-0.2 rounded bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+                    >
+                      {item.name}
+                    </span>
+                  {/if}
                   {formatBytes(item.size)}
-                </p>
+                </div>
               </div>
 
               <button

@@ -57,13 +57,18 @@ export class PaddleOcrEngine implements OcrEngine {
     const langGroup = options?.langGroup ?? "latin";
 
     if (this.session && this.currentLangGroup !== langGroup) {
+      console.info(
+        `[ocr] swapping rec model: ${this.currentLangGroup} → ${langGroup}`,
+      );
       await this.release();
     }
 
     if (!this.session) {
+      const modelPath = DefaultConfig.ocrModelPath(langGroup);
+      console.info(`[ocr] loading rec model: ${DefaultConfig.ocrRepo}/${modelPath}`);
       this.session = await downloadArtifactHF(
         DefaultConfig.ocrRepo,
-        DefaultConfig.ocrModelPath(langGroup),
+        modelPath,
         autoUpdate,
       );
       this.currentLangGroup = langGroup;

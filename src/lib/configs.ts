@@ -103,7 +103,6 @@ export const DefaultConfig = {
   ocrModelPath: (langGroup: string): `${string}.onnx` =>
     `languages/${langGroup}/rec.onnx`,
   ocrDictPath: (langGroup: string) => `languages/${langGroup}/dict.txt`,
-
   // Script-ID gate: verifies detected regions really hold the selected
   // source script before translating (strict when a CJK source is explicit,
   // additive page-majority under Auto-Detect).
@@ -116,12 +115,12 @@ export const DefaultConfig = {
   minTranslations: 5, // number of translations per series before resetting context
 
   geminiModels: [
+    { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash" },
     { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash" },
+    { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash" },
+    { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
     { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash Lite" },
     { id: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite" },
-    { id: "gemini-3-flash", label: "Gemini 3 Flash" },
-    { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-    { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite" },
   ],
   detectionModels: [
     {
@@ -208,3 +207,51 @@ export const DefaultConfig = {
     { id: "comic", label: "Comic Neue", stack: "'Comic Neue', cursive" },
   ],
 };
+
+// ── OCR language-group resolution ─────────────────────────────────────────
+// Groups with a dedicated `languages/<group>/rec.onnx` + `dict.txt` on the
+// paddleocr-onnx repo (mirrors `monkt/paddleocr-onnx/languages/`).
+export const SUPPORTED_LANG_GROUPS = [
+  "arabic",
+  "chinese",
+  "english",
+  "eslav",
+  "greek",
+  "hindi",
+  "korean",
+  "latin",
+  "tamil",
+  "telugu",
+  "thai",
+] as const;
+
+export interface ResolvedLangGroup {
+  /** Repo folder under `languages/`, e.g. "thai" or fallback "latin". */
+  group: string;
+  /** True when `sourceLang` had no direct mapping and fell back to latin. */
+  fellBack: boolean;
+}
+
+/**
+ * Single source of truth for source-language → rec-model group resolution.
+ * - "Latin" (capitalised UI label) and "Auto-Detect" resolve to "latin".
+ * - Direct `ocrLangGroupMap` hits resolve silently.
+ * - Anything else falls back to "latin" with `fellBack: true` so callers can
+ *   surface which `rec.onnx` was actually used.
+ */
+export function resolveLangGroup(sourceLang: string): ResolvedLangGroup {
+  if (sourceLang === "Latin" || sourceLang === "Auto-Detect") {
+    return { group: "latin", fellBack: false };
+  }
+  const mapped = ocrLangGroupMap[sourceLang];
+  if (mapped && (SUPPORTED_LANG_GROUPS as readonly string[]).includes(mapped)) {
+    return { group: mapped, fellBack: false };
+  }
+  if (mapped) {
+    console.warn(
+      `[ocr] language "${sourceLang}" maps to unknown group "${mapped}", falling back to "latin"`,
+    );
+    return { group: "latin", fellBack: true };
+  }
+  return { group: "latin", fellBack: true };
+}

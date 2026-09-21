@@ -15,7 +15,7 @@
     TriangleAlert,
     Download,
   } from "lucide-svelte";
-  import { DefaultConfig } from "@/lib/configs";
+  import { DefaultConfig, resolveLangGroup } from "@/lib/configs";
   import { normalizeInpaintMethod } from "@/lib/inpaint/ladder";
   import { env } from "@/lib/env";
   import { untrack } from "svelte";
@@ -368,17 +368,12 @@
 
     const isOcrMode = currentMode === "webgpu" || currentMode === "api";
     const switchedToLocal = currentMode !== prevMode && isOcrMode;
-    const currentLangGroup =
-      DefaultConfig.ocrLangGroupMap[sourceLang] ?? "latin";
-    const prevLangGroup =
-      DefaultConfig.ocrLangGroupMap[prevSourceLang] ?? "latin";
+    const currentLangGroup = resolveLangGroup(sourceLang).group;
+    const prevLangGroup = resolveLangGroup(prevSourceLang).group;
     const langGroupChangedInLocal =
       currentLangGroup !== prevLangGroup && isOcrMode;
 
-    if (
-      switchedToLocal ||
-      (langGroupChangedInLocal && sourceLang !== "Auto-Detect")
-    ) {
+    if (switchedToLocal || langGroupChangedInLocal) {
       prevSourceLang = sourceLang;
       prevMode = currentMode;
       isFetchingOCR = true;

@@ -16,6 +16,8 @@
     Image,
     BoxSelect,
   } from "lucide-svelte";
+  import { DefaultConfig, resolveLangGroup } from "@/lib/configs";
+  import { isArtifactCached } from "@/lib/utils";
 
   interface Props {
     targetImageRect: DOMRect;
@@ -198,6 +200,40 @@ function applyBboxesSort() {
     mode = "loading";
     loadingMsg = "Please wait while we translate the text...";
     applyBboxesSort();
+
+    // If the expected rec pack isn't cached, say so: otherwise a first-run
+    // model download looks like a hang. (Auto-Detect pre-checks latin; the
+    // gate may still resolve another script mid-translate — that pack's
+    // identity lands in the debug entry via gate.group.)
+    try {
+      const [srcLang, engine] = await Promise.all([
+        storage.getItem<string>("sync:source-lang"),
+        storage.getItem<string>("sync:ocr-engine"),
+      ]);
+      if (
+        (engine ?? DefaultConfig.ocrEngine) === "paddle" &&
+        typeof caches !== "undefined"
+      ) {
+        const { group } = resolveLangGroup(
+          srcLang ?? DefaultConfig.sourceLang,
+        );
+        const [recCached, dictCached] = await Promise.all([
+          isArtifactCached(
+            DefaultConfig.ocrRepo,
+            DefaultConfig.ocrModelPath(group),
+          ),
+          isArtifactCached(
+            DefaultConfig.ocrRepo,
+            DefaultConfig.ocrDictPath(group),
+          ),
+        ]);
+        if (!recCached || !dictCached) {
+          loadingMsg = `Downloading OCR model (languages/${group}/rec.onnx)…`;
+        }
+      }
+    } catch {
+      // Cache probe failed — keep the generic message.
+    }
 
     const result = await requestTextTranslation(
       $state.snapshot(bboxes),

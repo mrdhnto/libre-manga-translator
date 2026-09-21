@@ -1,7 +1,7 @@
 import { env } from "@/lib/env";
 import { downloadArtifactHF, arrayBufferToBase64DataUrl } from "@/lib/utils";
 import { detectHardware, ensureOffscreen } from "./utils";
-import { DefaultConfig } from "@/lib/configs";
+import { DefaultConfig, SUPPORTED_LANG_GROUPS, resolveLangGroup } from "@/lib/configs";
 import { testServerConnection } from "@/lib/server/main";
 import { createAsyncResponder, keepAliveWhile, withTimeout } from "./messaging";
 
@@ -485,7 +485,14 @@ export default defineBackground(() => {
               downloadArtifactHF(DefaultConfig.mangaOcrRepo, "vocab.txt", false, true),
             ]);
           } else {
-            const lang = data && data !== "paddle" ? data : "chinese";
+            // `data` is usually a resolved lang group from the popup; accept a
+            // language name too. Missing/unknown stays "chinese" (CJK focus).
+            const raw = data && data !== "paddle" ? String(data) : "";
+            const lang = !raw
+              ? "chinese"
+              : (SUPPORTED_LANG_GROUPS as readonly string[]).includes(raw)
+                ? raw
+                : resolveLangGroup(raw).group;
             await downloadArtifactHF(DefaultConfig.ocrRepo, DefaultConfig.ocrModelPath(lang), false, true);
             await downloadArtifactHF(DefaultConfig.ocrRepo, DefaultConfig.ocrDictPath(lang), false, true);
           }

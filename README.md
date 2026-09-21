@@ -154,9 +154,9 @@ Detection never sends an image anywhere. The detection models run in a dedicated
 
 **Language gate.** Before translating, LMT checks each detected region really holds the source language - a lightweight on-device script-identification model (a ~3.7 MB download) over the actual pixels, confirmed against the recognized text. Sound effects, lettering over artwork, and a localiser's Latin text on a Japanese page are held back instead of machine-translated into garbage: they keep their original text and are marked with a dashed outline and a **Translate anyway** button, so a wrong call is always one click from being undone. Strict when you pick a source language (especially Japanese/Chinese/Korean), gentle under **Auto-Detect** where it follows the page's majority script. Toggle in **Settings › OCR**.
 
-**OCR engine choice.** Pick the text reader in **Settings › OCR**: PaddleOCR (~80 MB, fast multilingual default) or Manga-OCR (~460 MB, Japanese manga specialist that handles vertical text and stylized lettering). Held-back regions keep their recognized text so you can still view and edit it.
+**OCR engine choice.** Pick the text reader in **Settings › OCR**: PaddleOCR (~90 MB, fast multilingual default — Latin + Chinese/Japanese packs ship at setup, 9 more language packs download on first use and the script gate auto-switches packs per page) or Manga-OCR (~460 MB, Japanese manga specialist that handles vertical text and stylized lettering). If the needed pack isn't cached yet, the overlay says which model it's downloading instead of spinning silently. Held-back regions keep their recognized text so you can still view and edit it.
 
-**Model storage.** **Settings › Model Storage** lists every downloaded weight with its size, plus per-model delete and full cache clear. Translation results are keyed per page + image, so re-opening a page reuses prior work.
+**Model storage.** **Settings › Model Storage** lists every downloaded weight with its size and language-group badge (e.g. `latin`, `chinese` for PaddleOCR packs), plus per-model delete and full cache clear. Translation results are keyed per page + image, so re-opening a page reuses prior work.
 
 **Universal cross-origin & anti-hotlink support.** Automatic fallback using background declarativeNetRequest to bypass CDN referer checks and Cloudflare protection on third-party manga hosting domains (e.g. `i.sstatic.net`, `imgsrv5.com`, `scans.lastation.us`). Combined with magic-byte MIME sniffing for robust image decoding across all formats (JPEG, PNG, WebP, GIF, AVIF).
 
@@ -364,6 +364,7 @@ for day-to-day activity between releases.
 - *Manga-OCR engine* - selectable Japanese specialist (~460 MB) that fixes vertical text and stylized lettering PaddleOCR dropped or misread. Pick it in **Settings › OCR**.
 - *Quality inpainting (LaMa-first)* - deep-learning redraw for screentone/halftone/art behind text (~207 MB one-time download, ~30–60s per region on CPU), with automatic Fast fallback per region. Pick **Fast** or **Quality** under **Appearance › Inpainting**.
 - *Extra detectors + model storage* - RT-DETR bubble detector and Comic Text Detector with pixel-mask seeding in **Settings › Detection**; **Settings › Model Storage** lists, deletes, and clears cached weights.
+- *Per-language PaddleOCR packs* - 11 recognition packs (latin, chinese, korean, thai, arabic, hindi, …) resolved per page by the script gate under Auto-Detect or by your source language; Latin + Chinese/Japanese download during onboarding so the common switch needs no mid-translate fetch. Korean, Thai, and other packs fetch on first encounter, with an overlay download notice while they do.
 - *Region tracking & OCR hardening* - page-index + image-hash cache keys, contrast/pad preprocessing, lower default Min Confidence (0.7), gate-held boxes keep their text for viewing/editing.
 
 ### 🔧 In Progress
@@ -374,7 +375,7 @@ for day-to-day activity between releases.
 ### 🐛 Known Issues (actively investigating)
 
 - *OCR reliability on Manhua / Manhwa / Webtoon text* - text extraction
-  intermittently fails on Chinese/Korean formats. Root cause still being isolated (may be OCR model limitation or preprocessing issue).
+  intermittently fails on Chinese/Korean formats. Per-language packs now ship/fetch automatically; remaining work is recognition quality on these layouts.
 - *Gate false negatives* - heavily stylized or mixed-script lettering can still be read
   as the wrong script; the language gate marks every hold-back and offers **Translate
   anyway**, so it never silently drops a bubble.
@@ -384,6 +385,8 @@ Found a bug not listed here? Open an issue - it helps prioritize.
 ### 🗺️ Planned
 
 - Signed Firefox release
+- Signed Chrome release
+- Auto Translate
 - More community site adapters
 
 ---

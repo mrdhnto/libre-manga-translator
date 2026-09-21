@@ -3,7 +3,7 @@ import Sidebar from "@/lib/components/Sidebar.svelte";
 import { mount, unmount } from "svelte";
 import { ShadowRootContentScriptUi } from "#imports";
 import { getSiteRule } from "@/lib/adapters";
-import { DefaultConfig } from "@/lib/configs";
+import { DefaultConfig, resolveLangGroup } from "@/lib/configs";
 import { logDebugEntry, updateDebugEntry } from "./debug";
 import {
   createImageObservers,
@@ -269,14 +269,14 @@ export default defineContentScript({
                   const debugCtx = {
                     version: (browser.runtime.getManifest() as any).version_name || browser.runtime.getManifest().version,
                     device: (await storage.getItem<string>("local:active-device")) ?? undefined,
-                    langGroup: DefaultConfig.ocrLangGroupMap[srcLang] ?? "latin",
+                    langGroup: resolveLangGroup(srcLang).group,
                     ocrMinConfidence: (await storage.getItem<number>("sync:ocr-min-confidence")) ?? DefaultConfig.ocrMinConfidence,
                     detectionMinConfidence: (await storage.getItem<number>("sync:detection-min-confidence")) ?? DefaultConfig.detectionMinConfidence,
                     temperature: (await storage.getItem<number>("sync:llm-temperature")) ?? DefaultConfig.llmTemperature,
                     serverSchema: (await storage.getItem<string>("local:server-schema")) ?? DefaultConfig.serverSchema,
                     geminiModel: (await storage.getItem<string>("sync:gemini-model")) ?? DefaultConfig.geminiModels[0].id,
                     ocrModel: DefaultConfig.ocrModelPath(
-                      DefaultConfig.ocrLangGroupMap[srcLang] ?? "latin",
+                      resolveLangGroup(srcLang).group,
                     ),
                     detectionModel: (await storage.getItem<string>("sync:detection-model")) ?? DefaultConfig.detectionModels[0].id,
                     llmModel: (await storage.getItem<string>("sync:llm-model")) ?? undefined,
