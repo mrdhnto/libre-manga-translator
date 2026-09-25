@@ -9,7 +9,7 @@ import {
  *
  * Crop-local: every mask lives in the crop's own coordinate system; `ox/oy`
  * carry the page origin of the crop so callers can map back. The seed is
- * threshold-based (Beta5 may upgrade it to a true text segmentation).
+ * threshold-based.
  */
 
 export interface Mask {

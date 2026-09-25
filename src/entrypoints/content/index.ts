@@ -1,15 +1,17 @@
 import Overlay from "@/lib/components/Overlay.svelte";
 import Sidebar from "@/lib/components/Sidebar.svelte";
+import FloatingTrigger from "@/lib/components/FloatingTrigger.svelte";
+import { AutoTranslateOrchestrator } from "./auto-translate";
+import * as Registry from "./translation-registry";
 import { mount, unmount } from "svelte";
 import { ShadowRootContentScriptUi } from "#imports";
 import { getSiteRule } from "@/lib/adapters";
-import { DefaultConfig } from "@/lib/configs";
+import { DefaultConfig, normalizeDetectionModel, resolveLangGroup } from "@/lib/configs";
 import { logDebugEntry, updateDebugEntry } from "./debug";
 import {
   createImageObservers,
   imageToBase64,
   repaintWithTranslations,
-  sendBboxDataToTelemetry,
   updateSeriesContext,
   inpaintImage,
   drawTranslations,
@@ -37,8 +39,6 @@ export default defineContentScript({
       string,
       { ui: ShadowRootContentScriptUi<any>; wrapper: HTMLElement }
     >();
-    let lastRightClickedSrc: string | undefined = undefined;
-    let lastRightClickedImg: HTMLImageElement | undefined = undefined;
     let lastDetectMs: number | undefined = undefined;
 
     // Mount independent sidebar shadow UI
@@ -58,78 +58,98 @@ export default defineContentScript({
       ui.mount();
     });
 
-    document.addEventListener("contextmenu", (e) => {
-      const img = e
-        .composedPath()
-        .find((el) => el instanceof HTMLImageElement) as
-        | HTMLImageElement
-        | undefined;
-      lastRightClickedImg = img;
-      lastRightClickedSrc = img && srcKey(img.src);
-    });
+    async function startTranslationPipeline(imgElement: HTMLImageElement) {
+      if (!imgElement || !document.body.contains(imgElement)) return;
+      const clicked = srcKey(imgElement.src);
+      const originalSrc = (clicked && translatedSrcMap.get(clicked)) ?? clicked;
+      if (!originalSrc) return;
 
-    browser.runtime.onMessage.addListener(async (msg, _, sendResponse) => {
-      if (msg.type === "lmt-translate-image") {
-        const clicked = msg.data ?? lastRightClickedSrc;
-        const originalSrc = (clicked && translatedSrcMap.get(clicked)) ?? clicked;
-        if (!originalSrc) return;
-
-        // If overlay already exists, bring it back to refine mode
-        if (overlays.has(originalSrc)) {
-          const existing = overlays.get(originalSrc)!;
-
-          if (!document.body.contains(existing.wrapper)) {
-            existing.ui.remove();
-            overlays.delete(originalSrc);
-          } else {
-            // It is still alive on the page, just bring it back to refine mode
-            existing.wrapper.dispatchEvent(
-              new CustomEvent("lmt:back-to-refine"),
-            );
-            return;
-          }
+      // ── Strict early registry guard (LMT-only, no page-world exposure) ──
+      const syncK = Registry.srcKeyOf(originalSrc);
+      if (Registry.isPending(syncK)) return;
+      if (Registry.getStatus(syncK) === "done" && overlays.has(originalSrc)) {
+        const existingDone = overlays.get(originalSrc)!;
+        if (document.body.contains(existingDone.wrapper)) {
+          existingDone.wrapper.dispatchEvent(
+            new CustomEvent("lmt:back-to-refine"),
+          );
+          return;
         }
+        // Overlay was done but wrapper detached — clear stale done so cache-restore can run
+        Registry.markIdle(originalSrc);
+      }
 
-        // Direct reference to right-clicked element; fallback to querySelector
-        let imgElement = lastRightClickedImg;
-        if (
-          !imgElement ||
-          !document.body.contains(imgElement) ||
-          (clicked && imgElement.src !== clicked && srcKey(imgElement.src) !== clicked)
-        ) {
-          imgElement =
-            document.querySelector<HTMLImageElement>(
-              `img[src="${originalSrc.replace(/"/g, '\\"')}"]`,
-            ) ?? undefined;
+      // If overlay already exists (idle/refining state), bring it back to refine mode
+      if (overlays.has(originalSrc)) {
+        const existing = overlays.get(originalSrc)!;
+
+        if (!document.body.contains(existing.wrapper)) {
+          existing.ui.remove();
+          overlays.delete(originalSrc);
+        } else {
+          // It is still alive on the page, just bring it back to refine mode
+          existing.wrapper.dispatchEvent(
+            new CustomEvent("lmt:back-to-refine"),
+          );
+          return;
         }
-        if (!imgElement) return;
+      }
 
-        // Use base64 when offscreen fetch would fail:
-        //   • blob: URLs are page-scoped - offscreen cannot fetch them
-        //   • cross-origin images may lack CORS headers - offscreen fetch is blocked
-        // imageToBase64 runs in the content script (page context) so both cases succeed.
-        // Same-origin https images use the raw URL to avoid JPEG re-encode and the
-        // MaxPool ceil() shape error it causes in PaddleOCR.
-        // Falls back to background proxy fetch with Referer header rewriting when canvas is tainted.
-        let src = originalSrc;
-        if (!originalSrc.startsWith("data:")) {
-          const dataUrl = imageToBase64(imgElement);
-          if (dataUrl) {
-            src = dataUrl;
-          } else {
-            try {
-              const res = await browser.runtime.sendMessage({
-                type: "PROXY_IMAGE",
-                data: { url: originalSrc, referer: window.location.href },
-              });
-              if (res?.dataUrl) {
-                src = res.dataUrl;
-              }
-            } catch (err) {
-              console.warn("LMT: Background image proxy failed:", err);
+      // Claim the pipeline SYNCHRONOUSLY (before the first await below)
+      // so queue slot accounting sees pending on the same tick the queue
+      // dispatched this call. The full cacheKey attaches right after.
+      Registry.markPending(originalSrc);
+
+      // Compute full cacheKey early for strict block on pending cacheKey
+      let pendingCacheKey: string | undefined;
+      try {
+        pendingCacheKey = await Registry.resolveCacheKey(imgElement, originalSrc);
+        if (Registry.getStatusByCacheKey(pendingCacheKey) === "pending") {
+          Registry.markIdle(originalSrc);
+          return;
+        }
+      } catch {
+        // ignore resolve failure — fall through to normal pipeline
+      }
+
+      // Attach the cacheKey to the pending claim (idempotent re-mark).
+      // Mark pending BEFORE any heavy work / overlay creation so second call strict-blocks
+      Registry.markPending(originalSrc, pendingCacheKey);
+
+      // Yield the main thread immediately so the user's click handler returns
+      // and the browser can process the next UI event (e.g. opening the popup
+      // via the action icon) before we start blocking the page on heavy work.
+      // Without this, a popup mount triggered right after click is queued
+      // behind our synchronous canvas.encode + DOM mutations and never paints
+      // until the pipeline advances to its first await point.
+      await new Promise<void>((r) => setTimeout(r, 0));
+
+      // Use base64 when offscreen fetch would fail:
+      //   - blob: URLs are page-scoped - offscreen cannot fetch them
+      //   - cross-origin images may lack CORS headers - offscreen fetch is blocked
+      // imageToBase64 runs in the content script (page context) so both cases succeed.
+      // Same-origin https images use the raw URL to avoid JPEG re-encode and the
+      // MaxPool ceil() shape error it causes in PaddleOCR.
+      // Falls back to background proxy fetch with Referer header rewriting when canvas is tainted.
+      let src = originalSrc;
+      if (!originalSrc.startsWith("data:")) {
+        const dataUrl = imageToBase64(imgElement);
+        if (dataUrl) {
+          src = dataUrl;
+        } else {
+          try {
+            const res = await browser.runtime.sendMessage({
+              type: "PROXY_IMAGE",
+              data: { url: originalSrc, referer: window.location.href },
+            });
+            if (res?.dataUrl) {
+              src = res.dataUrl;
             }
+          } catch (err) {
+            console.warn("LMT: Background image proxy failed:", err);
           }
         }
+      }
 
         const translationKey = async () => {
           const { seriesName, chapterId, pageIndex } = await getSiteRule();
@@ -158,6 +178,12 @@ export default defineContentScript({
           originalSrc,
           wrapper,
         );
+
+        // Yield once more before mounting the Overlay Svelte component. The
+        // overlay runs several synchronous $effects on mount (cache lookup,
+        // reading-direction read, etc.) and the page main thread is otherwise
+        // starved from running the popup's mount handler.
+        await new Promise<void>((r) => setTimeout(r, 0));
 
         createShadowRootUi(ctx, {
           name: "lmt-overlay",
@@ -196,15 +222,14 @@ export default defineContentScript({
 
                 requestBubbleDetection: async () => {
                   const tStart = performance.now();
-                  const detModel = (await storage.getItem<string>("sync:detection-model")) ?? DefaultConfig.detectionModels[0].id;
+                  const detModel = normalizeDetectionModel(
+                    (await storage.getItem<string>("sync:detection-model")) ?? DefaultConfig.detectionModels[0].id,
+                  );
                   const res = await browser.runtime.sendMessage({
                     type: "DETECT_BBOX",
                     data: src,
                     config: {
                       detectionModel: detModel,
-                      autoUpdateModel: await storage.getItem<boolean>(
-                        "sync:detection-auto-update",
-                      ),
                       detectionMinConfidence: await storage.getItem<number>(
                         "sync:detection-min-confidence",
                       ),
@@ -227,28 +252,33 @@ export default defineContentScript({
                     originalSrc,
                     pageIndex,
                   );
-                  const shareData =
-                    await storage.getItem<boolean>("sync:share-data");
 
-                  if (shareData && isManuallySorted)
-                    sendBboxDataToTelemetry(
-                      seriesName,
-                      chapterId,
-                      resolvedPage,
-                      // strip local-only fields (gateSkip) from the payload
-                      bboxes.map((b) => ({
-                        x1: b.x1,
-                        y1: b.y1,
-                        x2: b.x2,
-                        y2: b.y2,
-                        confidence: b.confidence,
-                      })),
-                      src,
-                    );
-
-                  let seriesContext = await storage.getItem<SeriesContext>(
+                  // ── Batch all config storage reads into one round-trip ──
+                  // Sequential `storage.getItem` calls each pay the SW hop cost
+                  // and serialize behind popup reads. Reading them in bulk
+                  // removes 13 sequential async hops from the hot path.
+                  const cfgItems = await storage.getItems([
                     `sync:context-${seriesName}`,
+                    "sync:current-mode",
+                    "sync:source-lang",
+                    "sync:target-lang",
+                    "local:active-device",
+                    "sync:ocr-min-confidence",
+                    "sync:detection-min-confidence",
+                    "sync:llm-temperature",
+                    "local:server-schema",
+                    "sync:gemini-model",
+                    "sync:detection-model",
+                    "sync:llm-model",
+                    "local:server-model",
+                  ]);
+                  const cfg = Object.fromEntries(
+                    cfgItems.map((i) => [i.key, i.value]),
                   );
+
+                  let seriesContext = cfg[`sync:context-${seriesName}`] as
+                    | SeriesContext
+                    | undefined;
 
                   // Perform the continuity check
                   if (seriesContext) {
@@ -263,25 +293,52 @@ export default defineContentScript({
                     }
                   }
 
-                  const curMode = (await storage.getItem<string>("sync:current-mode")) ?? DefaultConfig.currentMode;
-                  const srcLang = (await storage.getItem<string>("sync:source-lang")) ?? DefaultConfig.sourceLang;
-                  const tgtLang = (await storage.getItem<string>("sync:target-lang")) ?? DefaultConfig.targetLang;
+                  const curMode =
+                    (cfg["sync:current-mode"] as string | undefined) ??
+                    DefaultConfig.currentMode;
+                  const srcLang =
+                    (cfg["sync:source-lang"] as string | undefined) ??
+                    DefaultConfig.sourceLang;
+                  const tgtLang =
+                    (cfg["sync:target-lang"] as string | undefined) ??
+                    DefaultConfig.targetLang;
                   const debugCtx = {
                     version: (browser.runtime.getManifest() as any).version_name || browser.runtime.getManifest().version,
-                    device: (await storage.getItem<string>("local:active-device")) ?? undefined,
-                    langGroup: DefaultConfig.ocrLangGroupMap[srcLang] ?? "latin",
-                    ocrMinConfidence: (await storage.getItem<number>("sync:ocr-min-confidence")) ?? DefaultConfig.ocrMinConfidence,
-                    detectionMinConfidence: (await storage.getItem<number>("sync:detection-min-confidence")) ?? DefaultConfig.detectionMinConfidence,
-                    temperature: (await storage.getItem<number>("sync:llm-temperature")) ?? DefaultConfig.llmTemperature,
-                    serverSchema: (await storage.getItem<string>("local:server-schema")) ?? DefaultConfig.serverSchema,
-                    geminiModel: (await storage.getItem<string>("sync:gemini-model")) ?? DefaultConfig.geminiModels[0].id,
+                    device: (cfg["local:active-device"] as string | undefined) ?? undefined,
+                    langGroup: resolveLangGroup(srcLang).group,
+                    ocrMinConfidence: (cfg["sync:ocr-min-confidence"] as number | undefined) ?? DefaultConfig.ocrMinConfidence,
+                    detectionMinConfidence: (cfg["sync:detection-min-confidence"] as number | undefined) ?? DefaultConfig.detectionMinConfidence,
+                    temperature: (cfg["sync:llm-temperature"] as number | undefined) ?? DefaultConfig.llmTemperature,
+                    serverSchema: (cfg["local:server-schema"] as string | undefined) ?? DefaultConfig.serverSchema,
+                    geminiModel: (cfg["sync:gemini-model"] as string | undefined) ?? DefaultConfig.geminiModels[0].id,
                     ocrModel: DefaultConfig.ocrModelPath(
-                      DefaultConfig.ocrLangGroupMap[srcLang] ?? "latin",
+                      resolveLangGroup(srcLang).group,
                     ),
-                    detectionModel: (await storage.getItem<string>("sync:detection-model")) ?? DefaultConfig.detectionModels[0].id,
-                    llmModel: (await storage.getItem<string>("sync:llm-model")) ?? undefined,
-                    serverModel: (await storage.getItem<string>("local:server-model")) ?? undefined,
+                    detectionModel: normalizeDetectionModel(
+                      (cfg["sync:detection-model"] as string | undefined) ?? DefaultConfig.detectionModels[0].id,
+                    ),
+                    llmModel: (cfg["sync:llm-model"] as string | undefined) ?? undefined,
+                    serverModel: (cfg["local:server-model"] as string | undefined) ?? undefined,
                   };
+
+                  // ── Batch the remaining runtime keys for the message payload ──
+                  const runtimeItems = await storage.getItems([
+                    "local:gemini-key",
+                    "sync:gemini-model",
+                    "sync:ocr-min-confidence",
+                    "sync:ocr-engine",
+                    "sync:llm-model",
+                    "sync:llm-temperature",
+                    "local:server-host",
+                    "local:server-schema",
+                    "local:server-model",
+                    "local:use-server-api-key",
+                    "local:server-api-key",
+                    "sync:script-gate",
+                  ]);
+                  const runtime = Object.fromEntries(
+                    runtimeItems.map((i) => [i.key, i.value]),
+                  );
 
                   const resp = await browser.runtime.sendMessage({
                     type: "TRANSLATE_IMAGE",
@@ -294,33 +351,21 @@ export default defineContentScript({
                       currentMode: curMode,
                       targetLang: tgtLang,
                       sourceLang: srcLang,
-                      geminiKey:
-                        await storage.getItem<string>("local:gemini-key"),
-                      geminiModel:
-                        await storage.getItem<string>("sync:gemini-model"),
-                      ocrMinConfidence: await storage.getItem<number>(
-                        "sync:ocr-min-confidence",
-                      ),
+                      geminiKey: runtime["local:gemini-key"] as string | undefined,
+                      geminiModel: runtime["sync:gemini-model"] as string | undefined,
+                      ocrMinConfidence: runtime["sync:ocr-min-confidence"] as number | undefined,
                       ocrEngine:
-                        (await storage.getItem<string>("sync:ocr-engine")) ??
+                        (runtime["sync:ocr-engine"] as string | undefined) ??
                         DefaultConfig.ocrEngine,
-                      llmModel: await storage.getItem<string>("sync:llm-model"),
-                      llmTemperature: await storage.getItem<number>(
-                        "sync:llm-temperature",
-                      ),
-                      serverHost:
-                        await storage.getItem<string>("local:server-host"),
-                      serverSchema:
-                        await storage.getItem<string>("local:server-schema"),
-                      serverModel:
-                        await storage.getItem<string>("local:server-model"),
-                      useServerApiKey: await storage.getItem<boolean>(
-                        "local:use-server-api-key",
-                      ),
-                      serverApiKey:
-                        await storage.getItem<string>("local:server-api-key"),
+                      llmModel: runtime["sync:llm-model"] as string | undefined,
+                      llmTemperature: runtime["sync:llm-temperature"] as number | undefined,
+                      serverHost: runtime["local:server-host"] as string | undefined,
+                      serverSchema: runtime["local:server-schema"] as string | undefined,
+                      serverModel: runtime["local:server-model"] as string | undefined,
+                      useServerApiKey: runtime["local:use-server-api-key"] as boolean | undefined,
+                      serverApiKey: runtime["local:server-api-key"] as string | undefined,
                       scriptGate:
-                        (await storage.getItem<boolean>("sync:script-gate")) ??
+                        (runtime["sync:script-gate"] as boolean | undefined) ??
                         DefaultConfig.scriptGate,
                       gateForce: opts?.gateForce ?? false,
                     },
@@ -329,7 +374,9 @@ export default defineContentScript({
                   const duration = performance.now() - t0;
 
                   if (resp?.error) {
-                    const entryId = await logDebugEntry({
+                    // Fire-and-forget debug log so a slow storage write never
+                    // blocks the next pipeline stage or the popup from opening.
+                    logDebugEntry({
                       id: crypto.randomUUID(),
                       timestamp: Date.now(),
                       success: false,
@@ -354,8 +401,9 @@ export default defineContentScript({
                         server: curMode === "api" ? debugCtx.serverModel : undefined,
                       },
                       error: resp.error,
-                    });
-                    debugEntryIdBySrc.set(src, entryId);
+                    })
+                      .then((entryId) => debugEntryIdBySrc.set(src, entryId))
+                      .catch(() => {});
                     return resp;
                   }
 
@@ -369,7 +417,9 @@ export default defineContentScript({
                   };
                   const backend = resp?.backend;
 
-                  const entryId = await logDebugEntry({
+                  // Fire-and-forget: success debug log, page cache, and series
+                  // context updates. None of these need to block the popup.
+                  const successEntryPromise = logDebugEntry({
                     id: crypto.randomUUID(),
                     timestamp: Date.now(),
                     success: true,
@@ -405,25 +455,32 @@ export default defineContentScript({
                       llm: curMode === "webgpu" ? debugCtx.llmModel : undefined,
                       server: curMode === "api" ? debugCtx.serverModel : undefined,
                     },
-                  });
-                  debugEntryIdBySrc.set(src, entryId);
+                  })
+                    .then((entryId) => {
+                      debugEntryIdBySrc.set(src, entryId);
+                    })
+                    .catch(() => {});
 
-                  await storage.setItem<PageCache>(
-                    `local:${await translationKey()}`,
-                    {
+                  const cacheKey = await translationKey();
+                  storage
+                    .setItem<PageCache>(`local:${cacheKey}`, {
                       bboxes,
                       translations,
                       sourceTexts,
-                    },
-                  );
-                  await updateSeriesContext(
-                    seriesContext,
+                    })
+                    .catch(() => {});
+
+                  updateSeriesContext(
+                    seriesContext ?? null,
                     seriesName,
                     chapterId,
                     resolvedPage,
                     translations,
                     context,
-                  );
+                  ).catch(() => {});
+
+                  // Detach the success-log promise - return immediately.
+                  void successEntryPromise;
 
                   return { translations, sourceTexts, context, gateSkip, gate };
                 },
@@ -448,9 +505,8 @@ export default defineContentScript({
                   );
                   let cached = inpaintedSrcCache.get(src);
                   let inpaintMethod:
-                    | "auto"
-                    | "telea"
                     | "fast"
+                    | "quality"
                     | "fallback"
                     | undefined;
                   let inpaintMs: number | undefined;
@@ -499,10 +555,14 @@ export default defineContentScript({
                     // Attach inpainting details to the translate debug entry (same src).
                     const debugId = debugEntryIdBySrc.get(src);
                     if (debugId) {
+                      const inpaintLamaError = res.regions
+                        ?.map((r) => r.lamaError)
+                        .find((e): e is string => !!e);
                       await updateDebugEntry(debugId, {
                         inpaintMethod,
                         inpaintStats,
                         inpaintError: res.error,
+                        inpaintLamaError,
                         timing: { inpaint: inpaintMs },
                       });
                     }
@@ -550,6 +610,15 @@ export default defineContentScript({
             for (const [key, value] of translatedSrcMap) {
               if (value === originalSrc) translatedSrcMap.delete(key);
             }
+            // LMT-only registry: idle so pill/queue can retrigger after close/error
+            // Use pendingCacheKey if known, else just bySrc
+            try {
+              Registry.markIdle(originalSrc, pendingCacheKey);
+            } catch {
+              Registry.markIdle(originalSrc);
+            }
+
+            document.dispatchEvent(new CustomEvent("lmt:mode-change"));
 
             styleObserver.disconnect();
             domObserver.disconnect();
@@ -571,10 +640,57 @@ export default defineContentScript({
             subtree: true,
           });
         });
+    }
 
-        return true;
-      }
+    // ── Auto-Translate Engine (owns the unified queue) ────────────────────
+    // Created before the pill so manual clicks enqueue through the same
+    // limiter: slider cap when auto is ON, absolute 3 when OFF.
+    const autoTranslator = new AutoTranslateOrchestrator();
+    autoTranslator.init(startTranslationPipeline);
+    ctx.onInvalidated(() => autoTranslator.destroy());
 
+    // ── Floating Hover Trigger ──────────────────────────────────────────
+    createShadowRootUi(ctx, {
+      name: "lmt-floating-trigger",
+      position: "inline",
+      anchor: "body",
+      append: "last",
+      onMount: (uiContainer) =>
+        mount(FloatingTrigger, {
+          target: uiContainer,
+          props: {
+            onTranslate: (img: HTMLImageElement) => {
+              autoTranslator.enqueueManual(img);
+            },
+            getOverlayMode: (img: HTMLImageElement) => {
+              const key = srcKey(img.src);
+              const originalSrc = translatedSrcMap.get(key) ?? key;
+              const overlay = overlays.get(originalSrc);
+              if (!overlay) return "idle";
+              const mode = overlay.wrapper.getAttribute("data-lmt-mode");
+              if (mode === "results") return "translated";
+              if (mode === "loading") return "translating";
+              return "idle";
+            },
+            getOverlayProgress: (img: HTMLImageElement) => {
+              const key = srcKey(img.src);
+              const originalSrc = translatedSrcMap.get(key) ?? key;
+              const overlay = overlays.get(originalSrc);
+              return (
+                overlay?.wrapper.getAttribute("data-lmt-progress") ??
+                "Translating…"
+              );
+            },
+          },
+        }),
+      onRemove: (app) => {
+        if (app) unmount(app);
+      },
+    }).then((ui) => {
+      ui.mount();
+    });
+
+    browser.runtime.onMessage.addListener(async (msg, _, sendResponse) => {
       // Test Regex from popup settings to show live result
       if (msg.type === "TEST_REGEX_RULE") {
         getSiteRule([msg.data.rule]).then((result) =>

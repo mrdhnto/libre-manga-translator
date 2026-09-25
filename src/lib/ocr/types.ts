@@ -30,7 +30,6 @@ export interface OcrEngine {
     gateSkip: (GateReason | null)[],
     options?: {
       minConfidence?: number;
-      autoUpdate?: boolean;
       batchSize?: number;
       recImgHeight?: number;
       langGroup?: string;

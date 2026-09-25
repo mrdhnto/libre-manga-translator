@@ -77,7 +77,7 @@ interface DebugEntry {
   temperature?: number;
   serverSchema?: string;
   geminiModel?: string;
-  inpaintMethod?: "auto" | "telea" | "fast" | "fallback";
+  inpaintMethod?: "fast" | "quality" | "fallback";
   gate?: {
     mode: "off" | "cjk" | "other" | "auto";
     checked: number;
@@ -88,12 +88,14 @@ interface DebugEntry {
   inpaintStats?: {
     fill: number;
     denoise: number;
+    lama: number;
     telea: number;
     rectTelea: number;
     declined: number;
     skipped: number;
   };
   inpaintError?: string;
+  inpaintLamaError?: string;
   models: {
     detection?: string;
     ocr?: string;
@@ -120,6 +122,10 @@ interface SiteRule {
     regex: string;
     source: ExtractSource;
   };
+  /** CSS selector targeting the manga reader container element */
+  containerSelector?: string;
+  /** CSS selector targeting chapter page <img> elements */
+  imageSelector?: string;
 }
 
 type AIGeneratedRule = Omit<SiteRule, "id" | "domain">;

@@ -1,3 +1,12 @@
+/**
+ * OCR tensor pre/post-processing — MIT-only, pure JS (no eval / new Function).
+ *
+ * Invariants:
+ *  - All math is typed arrays (`Uint8Array`, `Float32Array`, `ImageData`) — zero dynamic code.
+ *  - Recognition height is 48 px (`DefaultConfig.ocrRecImgHeight`), CHW layout, normalized to `[-1, 1]` via `(v/255-0.5)/0.5`.
+ *  - Charset index 0 = CTC blank, last = space (`buildCharset`).
+ *  - Polarity and contrast helpers operate on edge-sampled luminance, never on network.
+ */
 import * as ort from "onnxruntime-web/all";
 
 function getBackgroundBrightness(

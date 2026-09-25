@@ -1,5 +1,3 @@
-import { fetchAsImageBitmap } from "../utils";
-
 /**
  * Pure-JS Telea (fast-marching) inpainting.
  *
@@ -10,31 +8,10 @@ import { fetchAsImageBitmap } from "../utils";
  * edge-sample blend. This module implements the same fast-marching method
  * (Telea) in plain typed-array math: no eval, no WASM, no deps.
  *
- * The core function works on an in-place ImageData + binary mask. The exported
- * `inpaintImageTelea` handles image loading, mask construction from bboxes and
- * data-URL output, and runs in the offscreen document.
+ * The core function works on an in-place ImageData + binary mask and serves as
+ * the final rung of the Fast ladder (`ladder.ts`); the legacy full-frame entry
+ * point was retired when the method picker collapsed to Fast vs Quality.
  */
-
-export function buildBboxMask(
-  width: number,
-  height: number,
-  bboxes: Bbox[],
-): Uint8Array {
-  const mask = new Uint8Array(width * height);
-  for (const bbox of bboxes) {
-    const x1 = Math.max(0, Math.round(bbox.x1));
-    const y1 = Math.max(0, Math.round(bbox.y1));
-    const x2 = Math.min(width - 1, Math.round(bbox.x2));
-    const y2 = Math.min(height - 1, Math.round(bbox.y2));
-    for (let y = y1; y <= y2; y++) {
-      const row = y * width;
-      for (let x = x1; x <= x2; x++) {
-        mask[row + x] = 1;
-      }
-    }
-  }
-  return mask;
-}
 
 const INF = 1e18;
 const MAX_PIXELS_FRACTION = 0.8; // skip FMM if mask covers >80% of the image (degenerate)
@@ -241,28 +218,4 @@ export function teleaInpaint(
   }
 }
 
-/**
- * Load an image, inpaint the given bboxes with Telea fast-marching, return a
- * PNG data URL. Designed to run in the offscreen document.
- */
-export async function inpaintImageTelea(
-  imageSrc: string,
-  bboxes: Bbox[],
-  radius = 3,
-): Promise<string> {
-  const bitmap = await fetchAsImageBitmap(imageSrc);
 
-  const canvas = document.createElement("canvas");
-  canvas.width = bitmap.width;
-  canvas.height = bitmap.height;
-  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
-  ctx.drawImage(bitmap, 0, 0);
-  bitmap.close();
-
-  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const mask = buildBboxMask(canvas.width, canvas.height, bboxes);
-  teleaInpaint(imgData, mask, radius);
-  ctx.putImageData(imgData, 0, 0);
-
-  return canvas.toDataURL("image/png");
-}

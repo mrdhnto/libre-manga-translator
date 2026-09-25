@@ -68,7 +68,7 @@ export const DefaultConfig = {
   // External LLM server (API Mode) - Ollama / LM Studio / OpenAI-compatible
   serverHost: "http://127.0.0.1:11434/v1",
   serverSchema: "openai",
-  serverModel: "qwen2.5:7b",
+  serverModel: "qwen3.5:4b",
   useServerApiKey: false,
   serverApiKey: "",
   serverEndpoints: {
@@ -79,22 +79,20 @@ export const DefaultConfig = {
   serverRetryDelayMs: 2000,
 
   detectionMinConfidence: 0.5,
-  detectionAutoUpdate: true,
-  detectionModelRepo: env.yoloDetectionModelRepo,
+  skipBboxRefining: false,
+  autoTranslate: false,
+  autoTranslateConcurrency: 1,
   rtdetrModelRepo: env.rtdetrModelRepo,
   comicTextDetectorUrl: env.comicTextDetectorUrl,
-  detectionModelPath: (model: string): `${string}.onnx` => `onnx/${model}.onnx`,
 
-  // Inpainting method: "auto" (engine ladder: fitted mask -> planar fill ->
-  // denoise -> Telea, each rung decline-gated) | "telea" (legacy full-frame
-  // fast-marching) | "fast" (edge-blend)
-  inpaintMethod: "auto",
-  inpaintLama: false,
+  // Inpainting method: "fast" (model-free ladder: fitted mask -> planar fill
+  // -> denoise -> Telea, each rung decline-gated) | "quality" (standalone
+  // LaMa-first pass per region, falling back into Fast where LaMa declines)
+  inpaintMethod: "fast",
   lamaRepo: env.lamaInpaintModelRepo,
-  lamaModelPath: "lama-manga.onnx" as `${string}.onnx`,
+  lamaModelPath: "lama-manga-dynamic.onnx" as `${string}.onnx`,
 
-  ocrEngine: "paddle",
-  ocrAutoUpdate: true,
+  ocrEngine: "paddle", // "paddle" | "ppocrv6-manga" (JA-only) | "manga-ocr" (JA-only)
   ocrMinConfidence: 0.7,
   ocrLangGroupMap, // Map source language to language group for model & dictionary selection
   ocrBatchSize: 4,
@@ -104,7 +102,6 @@ export const DefaultConfig = {
   ocrModelPath: (langGroup: string): `${string}.onnx` =>
     `languages/${langGroup}/rec.onnx`,
   ocrDictPath: (langGroup: string) => `languages/${langGroup}/dict.txt`,
-
   // Script-ID gate: verifies detected regions really hold the selected
   // source script before translating (strict when a CJK source is explicit,
   // additive page-majority under Auto-Detect).
@@ -117,31 +114,19 @@ export const DefaultConfig = {
   minTranslations: 5, // number of translations per series before resetting context
 
   geminiModels: [
+    { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash" },
     { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash" },
+    { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash" },
+    { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
     { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash Lite" },
     { id: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite" },
-    { id: "gemini-3-flash", label: "Gemini 3 Flash" },
-    { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-    { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite" },
   ],
   detectionModels: [
-    {
-      id: "yolo26n",
-      label: "YOLO26-Nano",
-      size: "2.4 MB",
-      desc: "Fast & lightweight (default)",
-    },
-    {
-      id: "yolo26s",
-      label: "YOLO26-Small",
-      size: "9.5 MB",
-      desc: "Higher accuracy for dense text",
-    },
     {
       id: "comic-bubble",
       label: "Comic Bubble Detector (RT-DETR)",
       size: "11.1 MB",
-      desc: "Bubble & free text detection (Apache-2.0)",
+      desc: "Bubble & free text detection (default, Apache-2.0)",
     },
     {
       id: "comic-text-detector",
@@ -152,16 +137,22 @@ export const DefaultConfig = {
   ],
   llmModels: [
     {
-      id: "Qwen3-4B-q4f16_1-MLC",
-      label: "Balanced",
-      desc: "Fast and capable for most manga translations.",
-      vram: "3.4 GB",
+      id: "gemma3-1b-it-q4f16_1-MLC",
+      label: "Gemma3-1B",
+      desc: "Small — fastest, good enough for simple dialogue.",
+      vram: "~800 MB",
     },
     {
-      id: "Qwen3-8B-q4f16_1-MLC",
-      label: "Powerful",
-      desc: "Richer reasoning for complex or literary text.",
-      vram: "5.7 GB",
+      id: "Qwen3.5-2B-q4f16_1-MLC",
+      label: "Qwen3.5-2B",
+      desc: "Balanced — speed and quality for most manga.",
+      vram: "~2.3 GB",
+    },
+    {
+      id: "Qwen3.5-4B-q4f16_1-MLC",
+      label: "Qwen3.5-4B",
+      desc: "Good — better reasoning for more complex manga.",
+      vram: "~3.9 GB",
     },
   ],
   availableLanguages: [
@@ -209,3 +200,64 @@ export const DefaultConfig = {
     { id: "comic", label: "Comic Neue", stack: "'Comic Neue', cursive" },
   ],
 };
+
+// ── OCR language-group resolution ─────────────────────────────────────────
+// Groups with a dedicated `languages/<group>/rec.onnx` + `dict.txt` on the
+// paddleocr-onnx repo (mirrors `monkt/paddleocr-onnx/languages/`).
+export const SUPPORTED_LANG_GROUPS = [
+  "arabic",
+  "chinese",
+  "english",
+  "eslav",
+  "greek",
+  "hindi",
+  "korean",
+  "latin",
+  "tamil",
+  "telugu",
+  "thai",
+] as const;
+
+export interface ResolvedLangGroup {
+  /** Repo folder under `languages/`, e.g. "thai" or fallback "latin". */
+  group: string;
+  /** True when `sourceLang` had no direct mapping and fell back to latin. */
+  fellBack: boolean;
+}
+
+/**
+ * Single source of truth for source-language → rec-model group resolution.
+ * - "Latin" (capitalised UI label) and "Auto-Detect" resolve to "latin".
+ * - Direct `ocrLangGroupMap` hits resolve silently.
+ * - Anything else falls back to "latin" with `fellBack: true` so callers can
+ *   surface which `rec.onnx` was actually used.
+ */
+export function resolveLangGroup(sourceLang: string): ResolvedLangGroup {
+  if (sourceLang === "Latin" || sourceLang === "Auto-Detect") {
+    return { group: "latin", fellBack: false };
+  }
+  const mapped = ocrLangGroupMap[sourceLang];
+  if (mapped && (SUPPORTED_LANG_GROUPS as readonly string[]).includes(mapped)) {
+    return { group: mapped, fellBack: false };
+  }
+  if (mapped) {
+    console.warn(
+      `[ocr] language "${sourceLang}" maps to unknown group "${mapped}", falling back to "latin"`,
+    );
+    return { group: "latin", fellBack: true };
+  }
+  return { group: "latin", fellBack: true };
+}
+
+/**
+ * Migrate stored detection-model ids after YOLO removal.
+ * - Removed YOLO ids ("yolo26n", "yolo26s") → "comic-bubble" (new default).
+ * - Known ids pass through untouched.
+ * - Anything else passes through so the loader throws the explicit
+ *   unknown-model error (with setup-wizard directions) instead of a
+ *   confusing HF 404.
+ */
+export function normalizeDetectionModel(id: string | null | undefined): string {
+  if (id === "yolo26n" || id === "yolo26s") return "comic-bubble";
+  return id || DefaultConfig.detectionModels[0].id;
+}

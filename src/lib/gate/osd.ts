@@ -27,7 +27,7 @@ export const gateReady = (): boolean => !!session;
 
 /** Load once; a failure (offline, first run) is not cached so the next page
  * can retry. */
-export async function ensureGate(autoUpdate = true): Promise<boolean> {
+export async function ensureGate(): Promise<boolean> {
   if (session) return true;
   if (!loadPromise) {
     loadPromise = (async () => {
@@ -36,7 +36,6 @@ export async function ensureGate(autoUpdate = true): Promise<boolean> {
           downloadArtifactHF(
             DefaultConfig.gateRepo,
             DefaultConfig.gateModelPath,
-            autoUpdate,
           ),
           downloadArtifactHF(
             DefaultConfig.gateRepo,
@@ -64,8 +63,8 @@ export async function ensureGate(autoUpdate = true): Promise<boolean> {
 }
 
 /** Whether the gate model opened, trying if needed (text checks still run). */
-export async function loadGate(autoUpdate: boolean): Promise<boolean> {
-  await ensureGate(autoUpdate);
+export async function loadGate(): Promise<boolean> {
+  await ensureGate();
   return gateReady();
 }
 

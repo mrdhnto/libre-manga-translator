@@ -1,8 +1,9 @@
 {
   "name": "lmt",
-  "description": "Local Manga Translator - Privacy-focused manga translation extension",
+  "description": "Libre Manga Translator - Privacy-focused manga translation extension, you decide where your data goes.",
   "private": true,
-  "version": "1.0.0-Beta5",
+  "version": "1.0.0",
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
     "dev": "wxt",
@@ -14,24 +15,28 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "check:inpaint": "bun scripts/inpaint-selfcheck.ts",
     "check:gate": "bun scripts/gate-selfcheck.ts",
+    "check:ocr-packs": "bun scripts/ocr-lang-packs-selfcheck.ts",
+    "check:ocr-audit": "bun scripts/ocr-runtime-audit.ts",
+    "extract-dict": "node scripts/extract-ppocrv6-dict.cjs",
+    "pin:hashes": "bun scripts/pin-model-hashes.ts",
     "postinstall": "wxt prepare"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
     "@tsconfig/svelte": "^5.0.7",
-    "@wxt-dev/module-svelte": "^2.0.3",
+    "@wxt-dev/module-svelte": "2.0.3",
     "svelte": "^5.38.6",
     "svelte-check": "^4.3.1",
     "tailwindcss": "^4.1.18",
     "terser": "^5.46.0",
     "tslib": "^2.8.1",
     "typescript": "^5.9.2",
-    "wxt": "^0.20.6"
+    "wxt": "0.20.11"
   },
   "dependencies": {
-    "@mlc-ai/web-llm": "^0.2.82",
+    "@mlc-ai/web-llm": "^0.2.85",
     "lucide-svelte": "^0.563.0",
-    "onnxruntime-web": "^1.24.2"
+    "onnxruntime-web": "^1.30.0"
   },
   "trustedDependencies": [
     "protobufjs",

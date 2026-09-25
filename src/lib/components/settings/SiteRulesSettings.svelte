@@ -147,17 +147,17 @@
 </script>
 
 <div>
-  <span class="text-sm font-bold uppercase tracking-widest text-zinc-500 ml-1">
-    Custom Site Parsing Rules
+  <span class="kicker ml-0.5">
+    Site parsing rules
   </span>
   <div
-    class="bg-zinc-50 dark:bg-zinc-900/50 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 mt-2 space-y-4"
+    class="panel-card !p-2.5 space-y-3"
   >
     {#if editingRule}
-      <div class="space-y-1.5">
+      <div class="space-y-1">
         <label
           for="domain"
-          class="text-[10px] font-bold uppercase tracking-widest text-zinc-500"
+          class="text-[10px] font-bold uppercase tracking-widest text-zinc-400"
         >
           Domain
         </label>
@@ -166,19 +166,19 @@
           type="text"
           bind:value={editingRule.domain}
           placeholder="e.g. mangadex.org"
-          class="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-xs outline-none shadow-sm"
+          class="w-full bg-[var(--bg-void)] border border-[var(--border-faint)] rounded-lg p-2 text-xs outline-none focus:border-[var(--border-line)]"
         />
       </div>
 
       <button
         onclick={generateRegexWithAI}
         disabled={isGeneratingAI}
-        class="cursor-pointer w-full flex items-center justify-center gap-2 py-2 my-3 bg-linear-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 text-white rounded-lg text-xs font-bold shadow-sm transition-all disabled:opacity-50"
+        class="btn-primary w-full justify-center py-2 my-2 text-xs font-bold uppercase tracking-wider"
       >
         {#if isGeneratingAI}
-          <span class="animate-spin">🌀</span> Generating...
+          <span class="animate-spin text-xs">🌀</span> Generating…
         {:else}
-          ✨ Auto-Generate Rules with AI
+          ✨ Auto-Generate Rules with Active AI
         {/if}
       </button>
 

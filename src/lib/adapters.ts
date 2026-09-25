@@ -1,3 +1,26 @@
+export type ExtractSource = "title" | "path" | "hash";
+
+export interface SiteRule {
+  id: string;
+  domain: string;
+  seriesName: {
+    regex: string;
+    source: ExtractSource;
+  };
+  chapterId: {
+    regex: string;
+    source: ExtractSource;
+  };
+  pageIndex: {
+    regex: string;
+    source: ExtractSource;
+  };
+  /** CSS selector targeting the manga reader container element */
+  containerSelector?: string;
+  /** CSS selector targeting chapter page <img> elements */
+  imageSelector?: string;
+}
+
 // TRUSTED CORE RULES (maintained by LMT maintainers)
 // Long-trusted sites live here. For everything else, drop a new adapter file
 // into src/lib/adapters/ - it is auto-imported at build time.
@@ -19,6 +42,8 @@ export const COMMUNITY_RULES: SiteRule[] = [
       regex: "\\/(\\d+)\\/?$",
       source: "path",
     },
+    containerSelector: ".md--reader-chapter",
+    imageSelector: ".md--page img.img, .md--reader-chapter img[src^='blob:']",
   },
   {
     id: "nhentai",
@@ -163,5 +188,22 @@ export async function getSiteRule(
           "0",
         ),
       ) || 0,
+    containerSelector: activeRule.containerSelector,
+    imageSelector: activeRule.imageSelector,
+    rule: activeRule,
   };
+}
+
+export async function resolveActiveSiteRule(
+  hostname?: string,
+  rulesOverride?: SiteRule[],
+): Promise<SiteRule> {
+  let rules = rulesOverride;
+  if (!rules) {
+    const customRules =
+      (await storage.getItem<SiteRule[]>("sync:custom-site-rules")) ?? [];
+    rules = [...customRules, ...COMMUNITY_RULES];
+  }
+  const host = hostname || window.location.hostname;
+  return rules.find((r) => r.domain && host.includes(r.domain)) || FALLBACK_RULE;
 }

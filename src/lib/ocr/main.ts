@@ -6,7 +6,7 @@ import {
   sliceImageDataIntoLines,
 } from "./utils";
 import { fetchAsImageBitmap } from "../utils";
-import { DefaultConfig } from "../configs";
+import { DefaultConfig, resolveLangGroup } from "../configs";
 import {
   groupForLabel,
   majorityLabel,
@@ -22,14 +22,26 @@ import { isTrustedLabel } from "../gate/charset";
 import type { OCRResult, OcrEngine, OcrOutcome } from "./types";
 import { PaddleOcrEngine } from "./paddle";
 import { MangaOcrEngine } from "./manga-ocr";
+import { env } from "../env";
 
 export type { OCRResult, OcrOutcome };
 
 const paddleEngine = new PaddleOcrEngine();
 const mangaOcrEngine = new MangaOcrEngine();
+// PP-OCRv6 small rec, manga fine-tune (Japanese-only): same CTC contract as
+// PaddleOCR (48px height, stock ppocrv6 dict + space + blank), fixed file +
+// bundled dict, so it reuses the Paddle runner.
+const ppocrv6MangaEngine = new PaddleOcrEngine({
+  id: "ppocrv6-manga",
+  label: "PP-OCRv6 Manga (Japanese)",
+  repo: env.ppocrv6MangaRepo,
+  modelPath: () => "ppocr-rec-v6-small-manga.onnx",
+  bundledDictPath: "dicts/ppocrv6_dict.txt",
+});
 
 export function getOcrEngine(id = DefaultConfig.ocrEngine): OcrEngine {
   if (id === "manga-ocr") return mangaOcrEngine;
+  if (id === "ppocrv6-manga") return ppocrv6MangaEngine;
   return paddleEngine;
 }
 
@@ -46,7 +58,6 @@ export async function textRecognise(
   bboxes: Bbox[],
   sourceLang: string,
   minConfidence = DefaultConfig.ocrMinConfidence,
-  autoUpdate = DefaultConfig.ocrAutoUpdate,
   batchSize = DefaultConfig.ocrBatchSize,
   recImgHeight = DefaultConfig.ocrRecImgHeight,
   gateOptions?: { enabled?: boolean; force?: boolean },
@@ -77,7 +88,7 @@ export async function textRecognise(
 
   // --- script-ID pass ---
   let gateLoaded = false;
-  if (mode !== "off") gateLoaded = await loadGate(autoUpdate);
+  if (mode !== "off") gateLoaded = await loadGate();
   const verdicts: (RegionVerdict | null)[] = new Array(bboxes.length).fill(null);
   if (mode !== "off" && gateLoaded) {
     for (let i = 0; i < bboxes.length; i++) {
@@ -92,14 +103,23 @@ export async function textRecognise(
       verdicts.filter((v): v is RegionVerdict => v !== null),
     );
   }
-  langGroup =
-    groupForLabel(pageLabel) ??
-    DefaultConfig.ocrLangGroupMap[sourceLang] ??
-    "latin";
+  const gateGroup = mode === "auto" && gateLoaded ? groupForLabel(pageLabel) : null;
+  if (gateGroup) {
+    langGroup = gateGroup;
+  } else {
+    const resolved = resolveLangGroup(sourceLang);
+    langGroup = resolved.group;
+    if (resolved.fellBack) {
+      console.warn(
+        `[ocr] "${sourceLang}" has no dedicated rec model — using languages/${langGroup}/rec.onnx`,
+      );
+    }
+  }
 
   // Pre-filter: a CONFIDENT, TRUSTED wrong-script refusal never gets read
+  const filterEnabled = gateOptions?.enabled ?? true;
   const gateSkip: (GateReason | null)[] = new Array(bboxes.length).fill(null);
-  if (mode === "cjk" && gateLoaded) {
+  if (filterEnabled && mode === "cjk" && gateLoaded) {
     for (let i = 0; i < bboxes.length; i++) {
       const v = verdicts[i];
       if (v && v.decision === "wrong-script" && isTrustedLabel(v.script)) {
@@ -117,7 +137,6 @@ export async function textRecognise(
     gateSkip,
     {
       minConfidence,
-      autoUpdate,
       batchSize,
       recImgHeight,
       langGroup,
@@ -135,13 +154,15 @@ export async function textRecognise(
   let skipped = gateSkip.filter((s) => s !== null).length;
   for (let i = 0; i < bboxes.length; i++) {
     if (gateSkip[i]) continue; // already skipped by pre-filter
-    const reason = decideSkip(
-      mode,
-      verdicts[i],
-      result[i].text,
-      sourceLang,
-      pageLabel,
-    );
+    const reason = filterEnabled
+      ? decideSkip(
+          mode,
+          verdicts[i],
+          result[i].text,
+          sourceLang,
+          pageLabel,
+        )
+      : null;
     if (reason) {
       result[i].gateSkip = reason;
       skipped++;

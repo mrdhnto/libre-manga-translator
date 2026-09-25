@@ -1,8 +1,23 @@
 <script lang="ts">
   import { getDebugLogs, clearDebugLogs } from "@/entrypoints/content/debug";
-  import { Check, Copy, Download, LoaderCircle, RefreshCw, Trash2 } from "lucide-svelte";
+  import { Check, Copy, Download, LoaderCircle, RefreshCw, Trash2, TriangleAlert } from "lucide-svelte";
 
   const DEBUG_ENABLED_KEY = "local:debug-enabled";
+
+  let {
+    // Compact mode (System tab default): toggle row only, plus an
+    // "open logs" affordance once debugging is enabled.
+    compact = false,
+    onOpenLogs,
+    // Controlled list visibility for the System ⇄ Logs view swap.
+    showList,
+    onBack,
+  }: {
+    compact?: boolean;
+    onOpenLogs?: () => void;
+    showList?: boolean;
+    onBack?: () => void;
+  } = $props();
 
   let logs = $state<DebugEntry[]>([]);
   let loading = $state(false);
@@ -11,6 +26,10 @@
   let expandedId = $state<string | null>(null);
   let debugEnabled = $state(false);
   let togglingEnabled = $state(false);
+  let internalOpen = $state(false);
+
+  // Controlled when the parent swaps views; uncontrolled otherwise.
+  const listOpen = $derived(showList ?? internalOpen);
 
   async function loadLogs() {
     loading = true;
@@ -32,7 +51,19 @@
     togglingEnabled = true;
     debugEnabled = !debugEnabled;
     await storage.setItem(DEBUG_ENABLED_KEY, debugEnabled);
+    if (!debugEnabled) {
+      internalOpen = false;
+      expandedId = null;
+    }
     togglingEnabled = false;
+  }
+
+  function openLogs() {
+    if (onOpenLogs) onOpenLogs();
+    else {
+      internalOpen = true;
+      loadLogs();
+    }
   }
 
   async function handleClear() {
@@ -77,39 +108,72 @@
   }
 </script>
 
-<!-- Enable toggle row -->
+{#if listOpen}
+<!-- Privacy / Sensitive Data Notice (log view only) -->
 <div
-  class="flex items-center justify-between p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50"
+  class="flex items-start gap-2 px-3 py-2.5 rounded-lg border border-amber-500/25 bg-amber-950/15 text-amber-200/90 text-xs"
 >
+  <TriangleAlert size={14} class="shrink-0 mt-0.5 text-amber-400/80" />
   <div class="flex flex-col gap-0.5">
-    <span class="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-      Enable Debug Logging
-    </span>
-    <span class="text-[10px] text-zinc-400">
-      {debugEnabled ? "Capturing translation data" : "Not recording - enable to start"}
+    <span class="font-semibold text-xs">Sensitive data notice</span>
+    <span class="text-[11px] opacity-80 leading-snug">
+      Debug logs record detected OCR text, prompts, and translation results from pages you visit. Avoid sharing exported logs publicly if they contain sensitive or private content.
     </span>
   </div>
-  <button
-    onclick={toggleEnabled}
-    disabled={togglingEnabled}
-    class="relative shrink-0 cursor-pointer disabled:opacity-50"
-    aria-label={debugEnabled ? "Disable debug logging" : "Enable debug logging"}
-  >
-    <div
-      class="w-10 h-6 rounded-full transition-colors duration-200 {debugEnabled
-        ? 'bg-blue-500'
-        : 'bg-zinc-300 dark:bg-zinc-600'}"
-    ></div>
-    <div
-      class="absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 {debugEnabled
-        ? 'translate-x-4'
-        : 'translate-x-0'}"
-    ></div>
-  </button>
+</div>
+{/if}
+
+<!-- Enable toggle row (always visible, compact) -->
+<div
+  class="panel-card !p-3 flex items-center justify-between gap-2"
+>
+  <div class="flex flex-col gap-0.5 min-w-0">
+    <span class="text-[13px] font-medium text-[var(--text-primary)]">
+      Debug logging
+    </span>
+    <span class="text-xs text-[var(--text-muted)]">
+      {debugEnabled ? "Capturing translation data" : "Off"}
+    </span>
+  </div>
+  <div class="flex items-center gap-2 shrink-0">
+    {#if compact && debugEnabled && !listOpen}
+      <button
+        type="button"
+        onclick={openLogs}
+        class="btn-ghost !py-1.5 !px-2.5 !text-[11px]"
+      >
+        View logs ({logs.length})
+      </button>
+    {/if}
+    <label class="switch-cyber is-rose">
+      <input type="checkbox" checked={debugEnabled} onchange={toggleEnabled} disabled={togglingEnabled} />
+      <span class="track"><span class="thumb"></span></span>
+    </label>
+  </div>
 </div>
 
+{#if !compact && debugEnabled && !listOpen}
+  <button
+    type="button"
+    onclick={openLogs}
+    class="btn-ghost w-full justify-center"
+  >
+    View logs ({logs.length})
+  </button>
+{/if}
+
+{#if listOpen}
+{#if onBack}
+  <button
+    type="button"
+    onclick={onBack}
+    class="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer transition-colors"
+  >
+    ← Back to System
+  </button>
+{/if}
 <!-- Log list header -->
-<div class="flex items-center justify-between mt-4 mb-2">
+<div class="flex items-center justify-between mt-1">
   <span class="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
     Logs ({logs.length}{logs.length === 50 ? ", max" : ""})
   </span>
@@ -117,7 +181,7 @@
     <button
       onclick={loadLogs}
       disabled={loading}
-      class="p-1 text-zinc-400 hover:text-blue-500 rounded cursor-pointer transition-colors"
+      class="p-1 text-zinc-400 hover:text-[var(--text-primary)] rounded cursor-pointer transition-colors"
       title="Refresh"
     >
       <RefreshCw size={12} class={loading ? "animate-spin" : ""} />
@@ -125,14 +189,14 @@
     {#if logs.length > 0}
       <button
         onclick={handleCopy}
-        class="p-1 text-zinc-400 hover:text-blue-500 rounded cursor-pointer transition-colors"
+        class="p-1 text-zinc-400 hover:text-[var(--text-primary)] rounded cursor-pointer transition-colors"
         title="Copy JSON"
       >
         {#if copied}<Check size={12} class="text-emerald-500" />{:else}<Copy size={12} />{/if}
       </button>
       <button
         onclick={handleExport}
-        class="p-1 text-zinc-400 hover:text-blue-500 rounded cursor-pointer transition-colors"
+        class="p-1 text-zinc-400 hover:text-[var(--text-primary)] rounded cursor-pointer transition-colors"
         title="Export JSON"
       >
         <Download size={12} />
@@ -149,9 +213,9 @@
 </div>
 
 <!-- Log entries -->
-<div class="space-y-2">
+<div class="space-y-2 mt-2">
   {#if logs.length === 0}
-    <div class="text-center py-6 text-xs text-zinc-400 italic">
+    <div class="text-center py-6 text-xs text-[var(--text-dim)] italic">
       {#if debugEnabled}
         No logs yet. Translate a page to capture data.
       {:else}
@@ -163,42 +227,42 @@
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
-        class="p-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs cursor-pointer hover:border-zinc-300 dark:hover:border-zinc-700 transition-all"
+        class="p-2 bg-[var(--surface-panel)] border border-[var(--border-faint)] rounded-lg text-xs cursor-pointer hover:border-[var(--border-line)] transition-all"
         onclick={() => (expandedId = expandedId === log.id ? null : log.id)}
       >
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-1.5 font-medium">
             <span
               class="w-2 h-2 rounded-full shrink-0 {log.success
-                ? 'bg-emerald-500'
-                : 'bg-red-500'}"
+                ? 'bg-[var(--accent-emerald)] shadow-[0_0_6px_var(--accent-emerald-glow)]'
+                : 'bg-[var(--accent-rose)] shadow-[0_0_6px_var(--accent-rose-glow)]'}"
             ></span>
-            <span class="font-mono text-[10px] text-zinc-400">
+            <span class="font-mono text-[10px] text-[var(--text-dim)]">
               {formatTime(log.timestamp)}
             </span>
             <span
-              class="px-1.5 rounded text-[10px] font-bold uppercase
+              class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase
               {log.mode === 'gemini'
-                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                ? 'bg-[var(--accent-emerald-soft)] text-[var(--accent-emerald)] border border-[var(--accent-emerald)]/30'
                 : log.mode === 'api'
-                  ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300'
-                  : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'}"
+                  ? 'bg-[var(--accent-cyan-soft)] text-[var(--accent-cyan)] border border-[var(--accent-cyan)]/30'
+                  : 'bg-[var(--accent-amber-soft)] text-[var(--accent-amber)] border border-[var(--accent-amber)]/30'}"
             >
               {log.mode}
             </span>
           </div>
-          <div class="flex items-center gap-1.5 text-[10px] text-zinc-400 font-mono">
+          <div class="flex items-center gap-1.5 text-[10px] text-[var(--text-dim)] font-mono">
             <button
               onclick={(e) => {
                 e.stopPropagation();
                 handleCopyOne(log.id);
               }}
-              class="p-1 text-zinc-400 hover:text-blue-500 rounded cursor-pointer transition-colors"
+              class="p-1 text-[var(--text-dim)] hover:text-[var(--text-primary)] rounded cursor-pointer transition-colors"
               title="Copy this entry as JSON"
               aria-label="Copy entry JSON"
             >
               {#if copiedId === log.id}
-                <Check size={12} class="text-emerald-500" />
+                <Check size={12} class="text-[var(--accent-emerald)]" />
               {:else}
                 <Copy size={12} />
               {/if}
@@ -209,16 +273,16 @@
         </div>
 
         {#if log.error}
-          <div class="mt-1 text-[10px] text-red-500 font-mono truncate">
+          <div class="mt-1 text-[10px] text-[var(--accent-rose)] font-mono truncate">
             {log.error}
           </div>
         {/if}
 
         {#if expandedId === log.id}
           <div
-            class="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-800 space-y-2"
+            class="mt-2 pt-2 border-t border-[var(--border-faint)] space-y-2"
           >
-            <div class="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] font-mono text-zinc-500">
+            <div class="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] font-mono text-[var(--text-dim)]">
               <div>{log.sourceLang} → {log.targetLang}</div>
               <div>Total: {formatDuration(log.timing?.total)}</div>
               {#if log.timing?.detect}
@@ -236,22 +300,22 @@
             </div>
 
             <!-- Models & pipeline metadata -->
-            <div class="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] font-mono text-zinc-400">
+            <div class="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] font-mono text-[var(--text-muted)]">
               {#if log.models?.detection}
                 <div class="flex items-center gap-1">
-                  <span class="text-zinc-500 uppercase">Det:</span>
+                  <span class="text-[var(--text-dim)] uppercase">Det:</span>
                   <span title="{log.models.detection}">{log.models.detection}</span>
                 </div>
               {/if}
               {#if log.models?.ocr}
                 <div class="flex items-center gap-1 truncate">
-                  <span class="text-zinc-500 uppercase">OCR:</span>
+                  <span class="text-[var(--text-dim)] uppercase">OCR:</span>
                   <span title="{log.models.ocr}">{log.models.ocr}</span>
                 </div>
               {/if}
               {#if log.models?.llm}
                 <div class="flex items-center gap-1 truncate">
-                  <span class="text-zinc-500 uppercase">LLM:</span>
+                  <span class="text-[var(--text-dim)] uppercase">LLM:</span>
                   <span title="{log.models.llm}">{log.models.llm}</span>
                 </div>
               {/if}
@@ -290,6 +354,11 @@
               {#if log.inpaintError}
                 <div class="col-span-2 text-[10px] font-mono text-red-400 truncate" title="{log.inpaintError}">
                   Inpaint err: {log.inpaintError}
+                </div>
+              {/if}
+              {#if log.inpaintLamaError}
+                <div class="col-span-2 text-[10px] font-mono text-red-400 truncate" title="{log.inpaintLamaError}">
+                  LaMa err: {log.inpaintLamaError}
                 </div>
               {/if}
               {#if log.gate}
@@ -365,3 +434,4 @@
     {/each}
   {/if}
 </div>
+{/if}

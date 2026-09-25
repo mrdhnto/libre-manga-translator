@@ -9,10 +9,22 @@ import {
   preprocessCrop,
   sliceImageDataIntoLines,
 } from "./utils";
-import { downloadArtifactHF } from "../utils";
+import { downloadArtifactHF, yieldToMain } from "../utils";
 import { DefaultConfig } from "../configs";
+import { env } from "../env";
 import type { OcrEngine, SingleOcrResult } from "./types";
 import type { GateReason } from "../gate";
+
+export interface PaddleEngineOptions {
+  id?: string;
+  label?: string;
+  /** Defaults to the per-language PaddleOCR repo. */
+  repo?: string;
+  /** Defaults to the per-group `languages/<group>/rec.onnx`. A fixed file ignores the group. */
+  modelPath?: (langGroup: string) => `${string}.onnx`;
+  /** Extension-local dict asset (e.g. bundled PP-OCRv6 dict) — skips the HF dict fetch. */
+  bundledDictPath?: string;
+}
 
 export class PaddleOcrEngine implements OcrEngine {
   id = "paddle";
@@ -21,7 +33,14 @@ export class PaddleOcrEngine implements OcrEngine {
   private session: ort.InferenceSession | null = null;
   private charset: string[] | null = null;
   private currentLangGroup: string | null = null;
+  /** Active provider key for mismatch-recreate (e.g. "wasm" vs "webgpu+wasm"). */
+  private sessionProvider: string | null = null;
   private runLock: Promise<void> = Promise.resolve();
+
+  constructor(private opts: PaddleEngineOptions = {}) {
+    if (opts.id) this.id = opts.id;
+    if (opts.label) this.label = opts.label;
+  }
 
   async release(): Promise<void> {
     if (this.session) {
@@ -33,7 +52,29 @@ export class PaddleOcrEngine implements OcrEngine {
       this.session = null;
       this.charset = null;
       this.currentLangGroup = null;
+      this.sessionProvider = null;
     }
+  }
+
+  /**
+   * Load or return cached charset for the given language group.
+   * Extracted for testability and to keep `recognize` focused on orchestration.
+   */
+  private async ensureCharset(repo: string, langGroup: string): Promise<string[]> {
+    if (this.charset) return this.charset;
+    if (this.opts.bundledDictPath) {
+      const url = (browser as unknown as { runtime: { getURL: (p: string) => string } }).runtime.getURL(this.opts.bundledDictPath as unknown as string);
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Failed to load bundled dict: ${res.status} ${res.statusText}`);
+      const dictText = await res.text();
+      this.charset = buildCharset(dictText);
+    } else {
+      const dictResp = await downloadArtifactHF(repo, DefaultConfig.ocrDictPath(langGroup));
+      const dictText = await dictResp.text();
+      if (!dictText || dictText.trim().length === 0) throw new Error(`Empty dictionary for ${langGroup}`);
+      this.charset = buildCharset(dictText);
+    }
+    return this.charset;
   }
 
   async recognize(
@@ -44,39 +85,40 @@ export class PaddleOcrEngine implements OcrEngine {
     gateSkip: (GateReason | null)[],
     options?: {
       minConfidence?: number;
-      autoUpdate?: boolean;
       batchSize?: number;
       recImgHeight?: number;
       langGroup?: string;
     },
   ): Promise<SingleOcrResult[]> {
     const minConfidence = options?.minConfidence ?? DefaultConfig.ocrMinConfidence;
-    const autoUpdate = options?.autoUpdate ?? DefaultConfig.ocrAutoUpdate;
     const batchSize = options?.batchSize ?? DefaultConfig.ocrBatchSize;
     const recImgHeight = options?.recImgHeight ?? DefaultConfig.ocrRecImgHeight;
     const langGroup = options?.langGroup ?? "latin";
+    const repo = this.opts.repo ?? DefaultConfig.ocrRepo;
+    const modelFile = (this.opts.modelPath ?? DefaultConfig.ocrModelPath)(langGroup);
+    // Key on the resolved file: per-group packs swap, a fixed-file engine
+    // (PP-OCRv6 manga) keeps its session across language changes.
+    const key = `${repo}:${modelFile}`;
 
-    if (this.session && this.currentLangGroup !== langGroup) {
+    if (this.session && this.currentLangGroup !== key) {
+      console.info(`[ocr] swapping rec model: ${this.currentLangGroup} → ${key}`);
       await this.release();
     }
 
     if (!this.session) {
-      this.session = await downloadArtifactHF(
-        DefaultConfig.ocrRepo,
-        DefaultConfig.ocrModelPath(langGroup),
-        autoUpdate,
-      );
-      this.currentLangGroup = langGroup;
+      console.info(`[ocr] loading rec model: ${repo}/${modelFile}`);
+      this.session = await downloadArtifactHF(repo, modelFile);
+      this.currentLangGroup = key;
+      // Record provider for future mismatch checks (extension-local probe may flip wasm↔webgpu).
+      try {
+        const maybeProviders = (this.session as unknown as { providers?: string[] })?.providers;
+        this.sessionProvider = Array.isArray(maybeProviders) ? maybeProviders.join("+") : "wasm";
+      } catch {
+        this.sessionProvider = "wasm";
+      }
     }
 
-    if (!this.charset) {
-      const dictResp = await downloadArtifactHF(
-        DefaultConfig.ocrRepo,
-        DefaultConfig.ocrDictPath(langGroup),
-      );
-      const dictText = await dictResp.text();
-      this.charset = buildCharset(dictText);
-    }
+    await this.ensureCharset(repo, langGroup);
 
     const crops = bboxes
       .map((bbox, index) =>
@@ -176,6 +218,7 @@ export class PaddleOcrEngine implements OcrEngine {
     }));
 
     for (let start = 0; start < crops.length; start += batchSize) {
+      await yieldToMain();
       const end = Math.min(crops.length, start + batchSize);
       const batchData = crops.slice(start, end);
       const batchImages = batchData.map(({ imageData }) => imageData);
@@ -205,8 +248,10 @@ export class PaddleOcrEngine implements OcrEngine {
         targetW,
       ]);
 
+      await yieldToMain();
       const inputName = this.session.inputNames[0];
       const outputMap = await this.session.run({ [inputName]: inputTensor });
+      await yieldToMain();
       const outputName = this.session.outputNames[0];
       const output = outputMap[outputName];
 

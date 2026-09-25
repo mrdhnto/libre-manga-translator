@@ -1,5 +1,5 @@
 import * as ort from "onnxruntime-web/all";
-import { fetchAsImageBitmap } from "../utils";
+import { fetchAsImageBitmap, yieldToMain } from "../utils";
 import { containmentNMS } from "./utils";
 import { refineDetections } from "./boxes";
 
@@ -26,14 +26,17 @@ export async function runRtDetrDetection(
   const imgData = ctx.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE);
   const plane = INPUT_SIZE * INPUT_SIZE;
   const buffer = new Float32Array(3 * plane);
+  const inv255 = 1.0 / 255.0;
 
+  await yieldToMain();
   for (let i = 0; i < plane; i++) {
     const idx = i * 4;
-    buffer[i] = imgData.data[idx] / 255.0;
-    buffer[plane + i] = imgData.data[idx + 1] / 255.0;
-    buffer[plane * 2 + i] = imgData.data[idx + 2] / 255.0;
+    buffer[i] = imgData.data[idx] * inv255;
+    buffer[plane + i] = imgData.data[idx + 1] * inv255;
+    buffer[plane * 2 + i] = imgData.data[idx + 2] * inv255;
   }
 
+  await yieldToMain();
   const imageTensor = new ort.Tensor("float32", buffer, [1, 3, INPUT_SIZE, INPUT_SIZE]);
   // Model contract measured: width first [origWidth, origHeight]
   const sizeArray = new BigInt64Array([BigInt(origWidth), BigInt(origHeight)]);
@@ -45,6 +48,7 @@ export async function runRtDetrDetection(
   feeds[inNames[1] ?? "orig_target_sizes"] = sizeTensor;
 
   const results = await session.run(feeds);
+  await yieldToMain();
   const labelsData = (await results["labels"].getData()) as BigInt64Array | Int32Array;
   const boxesData = (await results["boxes"].getData()) as Float32Array;
   const scoresData = (await results["scores"].getData()) as Float32Array;
