@@ -30,4 +30,7 @@ export default {
     regex: "\\/(\\d+)\\/?$",
     source: "path",
   },
+  // Optional DOM selectors for auto-translation engine:
+  containerSelector: ".reader-container",
+  imageSelector: ".reader-container img",
 } satisfies SiteRule;

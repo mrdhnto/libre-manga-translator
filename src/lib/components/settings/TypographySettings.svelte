@@ -50,29 +50,25 @@
   }
 </script>
 
-<div>
-  <span class="text-sm font-bold uppercase tracking-widest text-zinc-500 ml-1">
-    Typography
+<div class="space-y-1.5">
+  <span class="kicker ml-0.5">
+    Typography & fonts
   </span>
-  <div
-    class="bg-zinc-50 dark:bg-zinc-900/50 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 mt-2 space-y-4"
-  >
+  <div class="panel-card !p-2.5 space-y-3">
     <!-- Bundled font picker -->
-    <div class="flex flex-col space-y-2">
-      <label
-        for="bundle-font"
-        class="text-[10px] font-bold uppercase tracking-widest text-zinc-500"
-      >
-        Bubble Font
-      </label>
-      <div class="grid grid-cols-2 gap-2">
+    <div class="space-y-1.5">
+      <span class="text-[10px] font-bold uppercase tracking-widest text-[var(--text-dim)]">
+        Bubble Font Stack
+      </span>
+      <div class="grid grid-cols-2 gap-1.5">
         {#each DefaultConfig.bundleFonts as font}
           <button
+            type="button"
             onclick={() => (textFont = font.id)}
-            class="px-3 py-2 rounded-lg border text-sm transition-all cursor-pointer text-left shadow-sm
+            class="px-2.5 py-1.5 rounded-lg border text-xs transition-colors cursor-pointer text-left
             {textFont === font.id
-              ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-              : 'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-700 dark:text-zinc-300 hover:border-zinc-400'}"
+              ? 'border-[var(--accent-emerald)]/50 bg-[var(--accent-emerald-soft)] text-[var(--accent-emerald)] font-medium'
+              : 'border-[var(--border-line)] bg-[var(--bg-void)] text-[var(--text-muted)] hover:border-[var(--accent-emerald)]/50 hover:text-[var(--text-primary)]'}"
             style="font-family: {font.stack}"
           >
             {font.label}
@@ -83,38 +79,33 @@
 
     <!-- Custom fonts list -->
     {#if customFonts.length > 0}
-      <div class="flex flex-col space-y-1.5">
-        <label
-          for="custom-fonts"
-          class="text-[10px] font-bold uppercase tracking-widest text-zinc-500"
-        >
-          Custom Fonts
-        </label>
-        <div class="space-y-1.5">
+      <div class="space-y-1.5">
+        <span class="text-[10px] font-bold uppercase tracking-widest text-[var(--text-dim)]">
+          User Fonts
+        </span>
+        <div class="space-y-1">
           {#each customFonts as font}
             <div
-              class="flex items-center justify-between px-3 py-2 rounded-lg border cursor-pointer transition-all shadow-sm
+              class="flex items-center justify-between px-2 py-1.5 rounded-lg border cursor-pointer transition-colors
               {textFont === font.name
-                ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-                : 'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950'}"
+                ? 'border-[var(--accent-emerald)]/50 bg-[var(--accent-emerald-soft)] text-[var(--accent-emerald)] font-medium'
+                : 'border-[var(--border-line)] bg-[var(--bg-void)] text-[var(--text-muted)] hover:border-[var(--accent-emerald)]/50 hover:text-[var(--text-primary)]'}"
               role="presentation"
               onclick={() => (textFont = font.name)}
             >
-              <span
-                class="text-sm truncate max-w-40"
-                style="font-family: '{font.name}', sans-serif"
-              >
+              <span class="text-xs truncate max-w-44" style="font-family: '{font.name}', sans-serif">
                 {font.name}
               </span>
               <button
+                type="button"
                 onclick={(e) => {
                   e.stopPropagation();
                   deleteCustomFont(font.name);
                 }}
-                class="text-zinc-400 hover:text-red-500 transition-colors ml-2 cursor-pointer p-1 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                class="text-[var(--text-dim)] hover:text-[var(--accent-rose)] transition-colors cursor-pointer p-0.5"
                 aria-label="Delete font"
               >
-                <X size={14} />
+                <X size={13} />
               </button>
             </div>
           {/each}
@@ -130,22 +121,23 @@
       }}
       ondragleave={() => (isDraggingOver = false)}
       ondrop={(e) => {
+        e.preventDefault();
         isDraggingOver = false;
         handleDrop(e);
       }}
-      class="flex flex-col items-center justify-center gap-1.5 w-full py-4 px-3 rounded-lg border-2 border-dashed
-      transition-colors cursor-pointer bg-white dark:bg-zinc-950
+      class="flex flex-col items-center justify-center gap-1 w-full py-3 px-2 rounded-lg border border-dashed
+      transition-colors cursor-pointer bg-[var(--bg-void)]
       {isDraggingOver
-        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-500'
-        : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:border-blue-400 hover:text-blue-500'}"
+        ? 'border-[var(--accent-emerald)] text-[var(--accent-emerald)] bg-[var(--accent-emerald-soft)]'
+        : 'border-[var(--border-line)] text-[var(--text-dim)] hover:text-[var(--text-primary)] hover:border-[var(--accent-emerald)]/50'}"
     >
       {#if fontUploading}
-        <LoaderCircle size={18} class="animate-spin" />
-        <span class="text-sm font-medium">Uploading...</span>
+        <LoaderCircle size={15} class="animate-spin" />
+        <span class="text-xs">Uploading…</span>
       {:else}
-        <Upload size={18} />
-        <span class="text-sm font-medium">Drag & Drop Font Here</span>
-        <span class="text-[10px] opacity-60">(.ttf, .otf, .woff)</span>
+        <Upload size={15} />
+        <span class="text-xs font-medium">Drop custom font</span>
+        <span class="text-[11px] text-[var(--text-dim)]">.ttf · .otf · .woff · .woff2</span>
       {/if}
 
       <input

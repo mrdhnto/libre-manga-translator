@@ -3,12 +3,8 @@
 
 export const env = {
   githubRepo: import.meta.env.WXT_GITHUB_REPO || "",
-  telemetryUrl: import.meta.env.WXT_TELEMETRY_URL || "",
-  telemetryPublicKey: import.meta.env.WXT_TELEMETRY_PUBLIC_KEY || "",
 
   // Detection models
-  yoloDetectionModelRepo:
-    import.meta.env.WXT_YOLO_DETECTION_MODEL_REPO || "Kiuyha/Manga-Bubble-YOLO",
   rtdetrModelRepo:
     import.meta.env.WXT_RTDETR_MODEL_REPO ||
     "ogkalu/comic-text-and-bubble-detector",
@@ -25,9 +21,9 @@ export const env = {
     import.meta.env.WXT_PPOCRV6_MANGA_REPO ||
     "fumetodev/PP-OCRv6_small_rec_manga_ONNX",
 
-  // Inpaint models
+  // Inpaint models (dynamic-axes LaMa for WebGPU trial)
   lamaInpaintModelRepo:
-    import.meta.env.WXT_LAMA_INPAINT_MODEL_REPO || "mayocream/lama-manga-onnx",
+    import.meta.env.WXT_LAMA_INPAINT_MODEL_REPO || "ogkalu/lama-manga-onnx-dynamic",
 
   // Script gate model (Apache-2.0)
   gateModelRepo:
@@ -39,4 +35,3 @@ export const env = {
 };
 
 export const hasGithubRepo = () => !!env.githubRepo;
-export const hasTelemetry = () => !!env.telemetryUrl && !!env.telemetryPublicKey;

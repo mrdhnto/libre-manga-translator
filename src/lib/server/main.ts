@@ -5,22 +5,10 @@ import {
   buildOpenAITextRequest,
   ServerConfig,
 } from "./schemas";
+import { parseLlmJson, validateTranslationResult } from "./validator";
 
 export type { ServerConfig } from "./schemas";
-
-function parseLlmJson(content: string) {
-  let cleaned = content.trim();
-  if (cleaned.startsWith("```")) {
-    cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
-  }
-  try {
-    return JSON.parse(cleaned);
-  } catch (error) {
-    throw new Error(
-      `Failed to parse server JSON: ${(error as Error).message}\nRaw: ${content.substring(0, 500)}`,
-    );
-  }
-}
+export { parseLlmJson };
 
 async function callServer(
   systemPrompt: string,
@@ -117,7 +105,8 @@ export async function translateWithServer(
     seriesContext,
   );
 
-  return callServer(systemPrompt, userPrompt, config);
+  const raw = await callServer(systemPrompt, userPrompt, config);
+  return validateTranslationResult(raw, ocrResults.length);
 }
 
 export async function makeSiteRuleWithServer(

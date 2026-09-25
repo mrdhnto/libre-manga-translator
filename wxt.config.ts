@@ -5,7 +5,7 @@ import pkg from "./package.json";
 // See https://wxt.dev/api/config.html
 export default defineConfig({
   vite: () => ({
-    plugins: [tailwindcss()],
+    plugins: [tailwindcss() as any],
     build: {
       minify: import.meta.env.PROD ? "terser" : "esbuild",
     },
@@ -20,7 +20,6 @@ export default defineConfig({
       "scripting",
       "offscreen",
       "storage",
-      "contextMenus",
       "unlimitedStorage",
       "declarativeNetRequest",
     ],
@@ -49,9 +48,6 @@ export default defineConfig({
   srcDir: "src",
   modules: ["@wxt-dev/module-svelte"],
   webExt: {
-    binaries: {
-      firefox: "/usr/bin/firefox",
-    },
     chromiumArgs: [
       "--enable-unsafe-webgpu",
       "--ozone-platform=x11",

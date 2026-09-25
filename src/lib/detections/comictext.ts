@@ -2,6 +2,7 @@ import * as ort from "onnxruntime-web/all";
 import { scalingImage, restoreBoundingBox, containmentNMS } from "./utils";
 import { refineDetections } from "./boxes";
 import { resizeSegmentation, setPageSegmentation } from "./segmentation";
+import { yieldToMain } from "../utils";
 
 /**
  * ComicTextDetector (dmMaze / manga-image-translator beta-0.3, GPL-3.0, ~95 MB).
@@ -23,17 +24,21 @@ export async function runComicTextDetection(
 
   const channelSize = MODEL_SIZE * MODEL_SIZE;
   const imageBuffer = new Float32Array(3 * channelSize);
+  const inv255 = 1.0 / 255.0;
 
+  await yieldToMain();
   for (let i = 0; i < channelSize; i++) {
     const rgba = i * 4;
-    imageBuffer[i] = imageData.data[rgba] / 255.0;
-    imageBuffer[i + channelSize] = imageData.data[rgba + 1] / 255.0;
-    imageBuffer[i + channelSize * 2] = imageData.data[rgba + 2] / 255.0;
+    imageBuffer[i] = imageData.data[rgba] * inv255;
+    imageBuffer[i + channelSize] = imageData.data[rgba + 1] * inv255;
+    imageBuffer[i + channelSize * 2] = imageData.data[rgba + 2] * inv255;
   }
 
+  await yieldToMain();
   const inputTensor = new ort.Tensor("float32", imageBuffer, [1, 3, MODEL_SIZE, MODEL_SIZE]);
   const inputName = session.inputNames[0] ?? "image";
   const results = await session.run({ [inputName]: inputTensor });
+  await yieldToMain();
 
   let headTensor: ort.Tensor | null = null;
   let segTensor: ort.Tensor | null = null;

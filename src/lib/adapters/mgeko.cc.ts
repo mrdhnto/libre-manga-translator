@@ -25,4 +25,6 @@ export default {
     regex: "^$",
     source: "path",
   },
+  containerSelector: "#chapter-container, .reader-container",
+  imageSelector: "#chapter-container img, .chapter-images img",
 } satisfies SiteRule;

@@ -40,14 +40,14 @@ export class MangaOcrEngine implements OcrEngine {
     this.vocab = null;
   }
 
-  private async ensureModels(autoUpdate = true): Promise<void> {
+  private async ensureModels(): Promise<void> {
     if (this.encoderSession && this.decoderSession && this.vocab) return;
 
     const repo = DefaultConfig.mangaOcrRepo;
     const [enc, dec, vocabResp] = await Promise.all([
-      downloadArtifactHF(repo, "encoder_model.onnx", autoUpdate),
-      downloadArtifactHF(repo, "decoder_model.onnx", autoUpdate),
-      downloadArtifactHF(repo, "vocab.txt", autoUpdate),
+      downloadArtifactHF(repo, "encoder_model.onnx"),
+      downloadArtifactHF(repo, "decoder_model.onnx"),
+      downloadArtifactHF(repo, "vocab.txt"),
     ]);
 
     this.encoderSession = enc as ort.InferenceSession;
@@ -66,9 +66,9 @@ export class MangaOcrEngine implements OcrEngine {
     _sourceLang: string,
     _regionLines: ImageData[][],
     gateSkip: (GateReason | null)[],
-    options?: { autoUpdate?: boolean },
+    _options?: { minConfidence?: number },
   ): Promise<SingleOcrResult[]> {
-    await this.ensureModels(options?.autoUpdate);
+    await this.ensureModels();
     if (!this.encoderSession || !this.decoderSession || !this.vocab) {
       throw new Error("Manga-OCR sessions uninitialized");
     }

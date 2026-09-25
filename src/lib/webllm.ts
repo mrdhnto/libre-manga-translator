@@ -1,6 +1,7 @@
 import { MLCEngine } from "@mlc-ai/web-llm";
 import { DefaultConfig } from "./configs";
 import { buildSiteRulePrompts, buildTranslationPrompts } from "./prompts";
+import { parseLlmJson, validateTranslationResult } from "./server/validator";
 
 let globalEngine: MLCEngine | null = null;
 let currentlyLoadedModel: string | null = null;
@@ -24,13 +25,14 @@ export async function translateLocal(
     seriesContext,
   );
 
-  return await runLLMModel(
+  const raw = await runLLMModel(
     systemPrompt,
     userPrompt,
     schema,
     model,
     temperature,
   );
+  return validateTranslationResult(raw, ocrResults.length);
 }
 
 export async function makeSiteRuleLocal(
@@ -81,17 +83,15 @@ async function runLLMModel(
     },
   });
 
-  const resultText = reply.choices[0].message.content as string;
+  const content = reply.choices[0]?.message?.content;
+  if (!content) {
+    throw new Error("Local LLM returned empty response");
+  }
 
   try {
-    const cleanJsonString = resultText
-      .replace(/^```(?:json)?/im, "")
-      .replace(/```$/im, "")
-      .trim();
-
-    return JSON.parse(cleanJsonString);
+    return parseLlmJson(content);
   } catch (error) {
-    console.error("Failed to parse LLM output:", resultText);
-    throw new Error("Local LLM generated invalid JSON");
+    console.error("Failed to parse LLM output:", content);
+    throw new Error(`Local LLM generated invalid JSON: ${(error as Error).message}`);
   }
 }

@@ -1,6 +1,7 @@
 import { MAKE_SITE_RULE_PROMPT } from "../adapters";
 import { DefaultConfig } from "../configs";
 import { drawNumberedBboxes } from "./utils";
+import { validateTranslationResult } from "../server/validator";
 
 export async function translateWithGemini(
   imageSrc: string,
@@ -52,7 +53,7 @@ ${
     : ""
 }`;
 
-  return sendRequestToGemini(
+  const raw = await sendRequestToGemini(
     systemPrompt,
     userPrompt,
     apiKey,
@@ -63,6 +64,8 @@ ${
       data: cleanBase64,
     },
   );
+
+  return validateTranslationResult(raw, bboxes.length);
 }
 
 export async function makeSiteRuleWithGemini(
@@ -93,7 +96,7 @@ export async function sendRequestToGemini(
     mimeType: string;
     data: string;
   },
-): Promise<TranslateResult> {
+): Promise<any> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   const response = await fetch(url, {
@@ -129,7 +132,10 @@ export async function sendRequestToGemini(
   }
 
   const result = await response.json();
-  const resultText = result.candidates[0].content.parts[0].text;
+  const resultText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!resultText) {
+    throw new Error("Gemini API returned empty response parts");
+  }
 
   return JSON.parse(resultText);
 }

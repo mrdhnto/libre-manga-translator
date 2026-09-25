@@ -25,6 +25,7 @@ import { renderFill } from "../src/lib/inpaint/fill";
 import { regionDeclines } from "../src/lib/inpaint/quality";
 import { AlphaRamp, planTiles, tileOrigins } from "../src/lib/inpaint/lama";
 import { normalizeInpaintMethod, planFastMethods } from "../src/lib/inpaint/ladder";
+import { isModelWebGpuCapable } from "../src/lib/hardware";
 
 let failures = 0;
 const check = (name: string, cond: boolean) => {
@@ -266,6 +267,15 @@ function fitCase(
       qualityPlan[0] === "lama" && !qualityPlan.slice(1).includes("lama"),
     );
   }
+
+  // WebGPU capability allowlist: LaMa FFC complex-Add and ceil_mode=1
+  // models (RT-DETR, Chinese OCR) stay WASM; the rest run WebGPU
+  check("ep: static lama-manga is wasm-only (FFC Add has no JSEP kernel)", !isModelWebGpuCapable("lama-manga.onnx"));
+  check("ep: dynamic lama-manga is wasm-only (FFC Add has no JSEP kernel)", !isModelWebGpuCapable("lama-manga-dynamic.onnx"));
+  check("ep: comictextdetector is webgpu-capable", isModelWebGpuCapable("comictextdetector.pt.onnx"));
+  check("ep: rtdetr is wasm-only", !isModelWebGpuCapable("detector-v4-s_int8.onnx"));
+  check("ep: chinese ocr is wasm-only", !isModelWebGpuCapable("languages/chinese/rec.onnx"));
+  check("ep: latin ocr is webgpu-capable", isModelWebGpuCapable("languages/latin/rec.onnx"));
 
   // Stored method values normalize forward; legacy values all read as Fast
   check("method: quality stays quality", normalizeInpaintMethod("quality") === "quality");

@@ -1,4 +1,4 @@
-import { fetchAsImageBitmap } from "../utils";
+import { fetchAsImageBitmap, yieldToMain } from "../utils";
 import { teleaInpaint } from "./telea";
 import {
   buildInkSeed,
@@ -11,7 +11,7 @@ import { pageNoiseSigma, sobelMagnitude, strongEdgeFloor, toLuma } from "./noise
 import { fitMask, type Fitted, type Route } from "./fit";
 import { renderFill } from "./fill";
 import { renderDenoise } from "./denoise";
-import { renderLama } from "./lama";
+import { renderLama, renderLamaPatches, getLastLamaError } from "./lama";
 import { regionDeclines } from "./quality";
 import {
   CROP_MARGIN,
@@ -44,6 +44,7 @@ export interface InpaintRegionResult {
   deviation: number;
   thickness: number;
   ms: number;
+  lamaError?: string | null;
 }
 
 export interface InpaintAutoResult {
@@ -281,6 +282,7 @@ async function runAttempts(
   attempts: Attempt[],
   noiseSigma: number,
   otherRects: PageRect[],
+  skipDecline = false,
 ): Promise<{
   done: InpaintRegionResult["method"];
   lamaError: string | null;
@@ -288,8 +290,13 @@ async function runAttempts(
   let done: InpaintRegionResult["method"] = "declined";
   let lamaError: string | null = null;
   for (const attempt of attempts) {
-    const ok = await runRung(page, attempt.mask, attempt.render, () =>
-      regionDeclines(page, attempt.mask, noiseSigma, otherRects),
+    const ok = await runRung(
+      page,
+      attempt.mask,
+      attempt.render,
+      skipDecline
+        ? () => false
+        : () => regionDeclines(page, attempt.mask, noiseSigma, otherRects),
     );
     if (ok) {
       done = attempt.method;
@@ -355,6 +362,7 @@ export async function inpaintImageAuto(
   const regions: InpaintRegionResult[] = [];
 
   for (let i = 0; i < bboxes.length; i++) {
+    await yieldToMain();
     const prep = prepareRegion(
       page,
       strongFloor,
@@ -400,85 +408,37 @@ export async function inpaintImageAuto(
   return { url: canvas.toDataURL("image/png"), regions };
 }
 
-/**
- * Quality path: a standalone LaMa-first pass per region over the fitted `ink`
- * hole — decoupled from the Fast rung ladder. A region LaMa declines or fails
- * falls back into the Fast ladder, so Quality is a strict superset of Fast;
- * provenance records whichever rung actually shipped (`lama` or the fallback
- * rung) plus the LaMa failure reason when one was attempted.
- */
 export async function inpaintImageQuality(
   imageSrc: string,
   bboxes: Bbox[],
   options?: InpaintAutoOptions,
 ): Promise<InpaintAutoResult> {
-  const { canvas, ctx, page } = await openPage(imageSrc);
-  const { strongFloor, noiseSigma } = pageStats(page);
+  const { canvas, ctx } = await openPage(imageSrc);
 
-  const regions: InpaintRegionResult[] = [];
-
-  for (let i = 0; i < bboxes.length; i++) {
-    const prep = prepareRegion(
-      page,
-      strongFloor,
-      noiseSigma,
-      bboxes,
-      i,
-      options?.segmentation,
-    );
-    if (prep.kind === "skipped") {
-      regions.push({
-        index: i,
-        method: "skipped",
-        route: "rect",
-        deviation: 0,
-        thickness: 0,
-        ms: 0,
-      });
-      continue;
-    }
-    if (prep.kind === "rect") {
-      regions.push(await paintRectFallback(page, prep, noiseSigma));
-      continue;
-    }
-
-    const { fitted, cropRgb, otherRects, ms } = prep;
-    const first = await runAttempts(
-      page,
-      i,
-      [lamaAttemptFor(page, fitted)],
-      noiseSigma,
-      otherRects,
-    );
-    if (first.done === "lama") {
-      regions.push({
-        index: i,
-        method: "lama",
-        ...fittedProvenance(fitted),
-        ms: ms(),
-        lamaError: null,
-      });
-      continue;
-    }
-
-    const fellBack = await runAttempts(
-      page,
-      i,
-      fastAttempts(page, fitted, cropRgb, noiseSigma),
-      noiseSigma,
-      otherRects,
-    );
-    regions.push({
-      index: i,
-      method: fellBack.done,
-      ...fittedProvenance(fitted),
-      ms: ms(),
-      lamaError: first.lamaError,
-    });
+  if (bboxes.length === 0) {
+    return { url: canvas.toDataURL("image/png"), regions: [] };
   }
 
-  ctx.putImageData(page, 0, 0);
-  return { url: canvas.toDataURL("image/png"), regions };
+  const t0 = performance.now();
+  const lamaRes = await renderLamaPatches(canvas, ctx, bboxes);
+  const totalMs = Math.round(performance.now() - t0);
+
+  if (lamaRes.success) {
+    const regions: InpaintRegionResult[] = bboxes.map((_, i) => ({
+      index: i,
+      method: "lama",
+      route: "inpaint",
+      deviation: 0,
+      thickness: 0,
+      ms: Math.round(totalMs / bboxes.length),
+      lamaError: null,
+    }));
+    return { url: canvas.toDataURL("image/png"), regions };
+  }
+
+  // Model failed to initialize/execute (e.g. offline first-run): fall back to Fast ladder
+  console.warn("LMT: LaMa neural inpainting failed, falling back to Fast ladder:", lamaRes.error);
+  return await inpaintImageAuto(imageSrc, bboxes, options);
 }
 
 /**

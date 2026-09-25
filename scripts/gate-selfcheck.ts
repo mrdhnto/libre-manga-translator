@@ -182,6 +182,8 @@ check("skip: auto without page label keeps everything", decideSkip("auto", null,
 check("mode: cjk source", gateModeFor("Japanese", true, false) === "cjk");
 check("mode: force turns off", gateModeFor("Japanese", true, true) === "off");
 check("mode: auto", gateModeFor("Auto-Detect", true, false) === "auto");
+check("mode: auto-detect stays auto when gate disabled", gateModeFor("Auto-Detect", false, false) === "auto");
+check("mode: disabled gate is off for explicit source", gateModeFor("Japanese", false, false) === "off");
 check("mode: other", gateModeFor("Russian", true, false) === "other");
 
 // --- region build (merge / size) ------------------------------------------

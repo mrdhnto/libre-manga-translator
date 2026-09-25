@@ -68,8 +68,9 @@ export function gateModeFor(
   enabled: boolean,
   force: boolean,
 ): GateMode {
-  if (!enabled || force) return "off";
+  if (force) return "off";
   if (sourceLang === "Auto-Detect") return "auto";
+  if (!enabled) return "off";
   return isCjkSource(sourceLang) ? "cjk" : "other";
 }
 

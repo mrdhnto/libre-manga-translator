@@ -6,7 +6,7 @@ export async function scalingImage(imageSrc: string, modelSize: number = 1280) {
   const canvas = new OffscreenCanvas(modelSize, modelSize);
   const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
 
-  // Fill the background with YOLO's standard padding color (gray)
+  // Fill the background with the letterbox padding color (gray)
   ctx.fillStyle = "rgb(114, 114, 114)";
   ctx.fillRect(0, 0, modelSize, modelSize);
 

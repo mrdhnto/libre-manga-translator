@@ -23,4 +23,6 @@ export default {
     regex: "^$",
     source: "path",
   },
+  containerSelector: "#wrapper",
+  imageSelector: ".reader-container img, .carousel-item img",
 } satisfies SiteRule;

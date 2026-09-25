@@ -21,4 +21,6 @@ export default {
     regex: "^$",
     source: "path",
   },
+  containerSelector: "article",
+  imageSelector: "article img",
 } satisfies SiteRule;

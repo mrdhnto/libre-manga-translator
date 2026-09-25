@@ -58,7 +58,6 @@ export async function textRecognise(
   bboxes: Bbox[],
   sourceLang: string,
   minConfidence = DefaultConfig.ocrMinConfidence,
-  autoUpdate = DefaultConfig.ocrAutoUpdate,
   batchSize = DefaultConfig.ocrBatchSize,
   recImgHeight = DefaultConfig.ocrRecImgHeight,
   gateOptions?: { enabled?: boolean; force?: boolean },
@@ -89,7 +88,7 @@ export async function textRecognise(
 
   // --- script-ID pass ---
   let gateLoaded = false;
-  if (mode !== "off") gateLoaded = await loadGate(autoUpdate);
+  if (mode !== "off") gateLoaded = await loadGate();
   const verdicts: (RegionVerdict | null)[] = new Array(bboxes.length).fill(null);
   if (mode !== "off" && gateLoaded) {
     for (let i = 0; i < bboxes.length; i++) {
@@ -118,8 +117,9 @@ export async function textRecognise(
   }
 
   // Pre-filter: a CONFIDENT, TRUSTED wrong-script refusal never gets read
+  const filterEnabled = gateOptions?.enabled ?? true;
   const gateSkip: (GateReason | null)[] = new Array(bboxes.length).fill(null);
-  if (mode === "cjk" && gateLoaded) {
+  if (filterEnabled && mode === "cjk" && gateLoaded) {
     for (let i = 0; i < bboxes.length; i++) {
       const v = verdicts[i];
       if (v && v.decision === "wrong-script" && isTrustedLabel(v.script)) {
@@ -137,7 +137,6 @@ export async function textRecognise(
     gateSkip,
     {
       minConfidence,
-      autoUpdate,
       batchSize,
       recImgHeight,
       langGroup,
@@ -155,13 +154,15 @@ export async function textRecognise(
   let skipped = gateSkip.filter((s) => s !== null).length;
   for (let i = 0; i < bboxes.length; i++) {
     if (gateSkip[i]) continue; // already skipped by pre-filter
-    const reason = decideSkip(
-      mode,
-      verdicts[i],
-      result[i].text,
-      sourceLang,
-      pageLabel,
-    );
+    const reason = filterEnabled
+      ? decideSkip(
+          mode,
+          verdicts[i],
+          result[i].text,
+          sourceLang,
+          pageLabel,
+        )
+      : null;
     if (reason) {
       result[i].gateSkip = reason;
       skipped++;

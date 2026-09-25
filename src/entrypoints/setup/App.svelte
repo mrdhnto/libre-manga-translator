@@ -14,8 +14,13 @@
     Zap,
     CircleAlert,
     CircleCheck,
+    ExternalLink,
+    ArrowLeft,
+    Sliders,
+    Info,
   } from "lucide-svelte";
-  import { DefaultConfig } from "@/lib/configs";
+  import { DefaultConfig, normalizeDetectionModel } from "@/lib/configs";
+  import { UNKNOWN_DETECTION_MODEL_MESSAGE } from "@/lib/detections/main";
   import { MLCEngine, deleteModelAllInfoInCache } from "@mlc-ai/web-llm";
   import { untrack } from "svelte";
   import { env } from "@/lib/env";
@@ -40,7 +45,6 @@
   let privacyLoading = $state(false);
   let privacyFetchError = $state(false);
   let acceptedPolicy = $state(false);
-  let shareData = $state(false);
 
   // Detection step
   let detectionModel = $state(DefaultConfig.detectionModels[0].id);
@@ -65,6 +69,7 @@
   let selectedOcrEngine = $state(DefaultConfig.ocrEngine);
   let ocrDownloading = $state(false);
   let ocrDownloaded = $state(false);
+  let gateDownloaded = $state(false);
   let ocrProgress = $state(0);
   let ocrProgressText = $state("");
   let ocrError = $state<string | null>(null);
@@ -89,7 +94,7 @@
   let llmCleanError = $state<string | null>(null);
 
   // Handle ?model= query param: skip straight to LLM step
-  // ?clean=1 removes the cached model (same context, same cache partition) then offers re-download.
+  // ?clean=1 removes the cached model then offers re-download.
   $effect(() => {
     const params = new URLSearchParams(window.location.search);
     const modelParam = params.get("model");
@@ -200,7 +205,7 @@
           html += "</ul>";
           inList = false;
         }
-        html += '<hr class="border-zinc-200 dark:border-zinc-700 my-4" />';
+        html += '<hr class="border-[var(--border-faint)] my-3.5" />';
         continue;
       }
       if (line.startsWith("# ")) {
@@ -208,7 +213,7 @@
           html += "</ul>";
           inList = false;
         }
-        html += `<h1 class="text-xl font-bold mb-2 text-zinc-900 dark:text-zinc-100">${fmt(line.slice(2))}</h1>`;
+        html += `<h1 class="text-base font-display font-bold mb-2 text-[var(--text-primary)]">${fmt(line.slice(2))}</h1>`;
         continue;
       }
       if (line.startsWith("## ")) {
@@ -216,7 +221,7 @@
           html += "</ul>";
           inList = false;
         }
-        html += `<h2 class="text-base font-bold mt-5 mb-1.5 text-zinc-800 dark:text-zinc-200">${fmt(line.slice(3))}</h2>`;
+        html += `<h2 class="text-sm font-display font-bold mt-4 mb-1.5 text-[var(--text-primary)]">${fmt(line.slice(3))}</h2>`;
         continue;
       }
       if (line.startsWith("### ")) {
@@ -224,7 +229,7 @@
           html += "</ul>";
           inList = false;
         }
-        html += `<h3 class="text-sm font-semibold mt-3 mb-1 text-zinc-700 dark:text-zinc-300">${fmt(line.slice(4))}</h3>`;
+        html += `<h3 class="text-xs font-display font-semibold mt-3 mb-1 text-[var(--text-muted)]">${fmt(line.slice(4))}</h3>`;
         continue;
       }
       if (line.startsWith("> ")) {
@@ -232,15 +237,15 @@
           html += "</ul>";
           inList = false;
         }
-        html += `<blockquote class="border-l-2 border-blue-400 pl-3 my-2 py-0.5 text-xs italic text-zinc-500 dark:text-zinc-400 bg-blue-50/50 dark:bg-blue-950/20 rounded-r">${fmt(line.slice(2))}</blockquote>`;
+        html += `<blockquote class="border-l-2 border-[var(--accent-cyan)] pl-3 my-2 py-1 text-xs italic text-[var(--text-dim)] bg-[var(--bg-void)] rounded-r">${fmt(line.slice(2))}</blockquote>`;
         continue;
       }
       if (line.startsWith("- ")) {
         if (!inList) {
-          html += '<ul class="list-disc list-inside space-y-0.5 my-1.5">';
+          html += '<ul class="list-disc list-inside space-y-1 my-1.5">';
           inList = true;
         }
-        html += `<li class="text-xs text-zinc-600 dark:text-zinc-400">${fmt(line.slice(2))}</li>`;
+        html += `<li class="text-xs text-[var(--text-muted)] leading-relaxed">${fmt(line.slice(2))}</li>`;
         continue;
       }
       if (!line.trim()) {
@@ -254,7 +259,7 @@
         html += "</ul>";
         inList = false;
       }
-      html += `<p class="text-xs leading-relaxed text-zinc-600 dark:text-zinc-400 mb-1.5">${fmt(line)}</p>`;
+      html += `<p class="text-xs leading-relaxed text-[var(--text-muted)] mb-2">${fmt(line)}</p>`;
     }
     if (inList) html += "</ul>";
     return html;
@@ -264,15 +269,15 @@
     return text
       .replace(
         /\*\*(.+?)\*\*/g,
-        '<strong class="font-semibold text-zinc-800 dark:text-zinc-200">$1</strong>',
+        '<strong class="font-semibold text-[var(--text-primary)]">$1</strong>',
       )
       .replace(
         /`(.+?)`/g,
-        '<code class="text-xs bg-zinc-200 dark:bg-zinc-700 px-1 rounded font-mono">$1</code>',
+        '<code class="text-[11px] font-mono bg-[var(--surface-panel)] text-[var(--accent-cyan)] px-1.5 py-0.5 rounded border border-[var(--border-faint)]">$1</code>',
       )
       .replace(
         /\[(.+?)\]\((.+?)\)/g,
-        '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:text-blue-400 underline">$1</a>',
+        '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-[var(--accent-cyan)] hover:underline font-medium">$1</a>',
       );
   }
 
@@ -290,10 +295,7 @@
         DefaultConfig.comicTextDetectorUrl,
       );
     } else {
-      cached = await isArtifactCached(
-        DefaultConfig.detectionModelRepo,
-        DefaultConfig.detectionModelPath(detectionModel),
-      );
+      throw new Error(UNKNOWN_DETECTION_MODEL_MESSAGE(detectionModel));
     }
     detectionPrefetched = cached;
     return cached;
@@ -332,11 +334,7 @@
           onProgress,
         );
       } else {
-        await fetchAndCacheWithProgress(
-          DefaultConfig.detectionModelRepo,
-          DefaultConfig.detectionModelPath(detectionModel),
-          onProgress,
-        );
+        throw new Error(UNKNOWN_DETECTION_MODEL_MESSAGE(detectionModel));
       }
       detectionPrefetched = true;
       detectionProgress = 100;
@@ -355,20 +353,19 @@
     return "PaddleOCR";
   }
 
-  async function checkOcrStatus(): Promise<boolean> {    ocrError = null;
-    let cached = false;
+  async function checkOcrStatus(): Promise<boolean> {
+    ocrError = null;
+    let ocrCached = false;
     if (selectedOcrEngine === "manga-ocr") {
-      cached =
+      ocrCached =
         (await isArtifactCached(DefaultConfig.mangaOcrRepo, "encoder_model.onnx")) &&
         (await isArtifactCached(DefaultConfig.mangaOcrRepo, "decoder_model.onnx"));
     } else if (selectedOcrEngine === "ppocrv6-manga") {
-      cached = await isArtifactCached(
+      ocrCached = await isArtifactCached(
         env.ppocrv6MangaRepo,
         "ppocr-rec-v6-small-manga.onnx",
       );
     } else {
-      // First-run ships Latin + Chinese/Japanese packs so the Auto-Detect
-      // gate can switch between them without downloading mid-translate.
       const [latinRec, latinDict, chineseRec, chineseDict] = await Promise.all([
         isArtifactCached(
           DefaultConfig.ocrRepo,
@@ -387,10 +384,16 @@
           DefaultConfig.ocrDictPath("chinese"),
         ),
       ]);
-      cached = latinRec && latinDict && chineseRec && chineseDict;
+      ocrCached = latinRec && latinDict && chineseRec && chineseDict;
     }
-    ocrDownloaded = cached;
-    return cached;
+
+    const [gateModel, gateLabels] = await Promise.all([
+      isArtifactCached(DefaultConfig.gateRepo, DefaultConfig.gateModelPath),
+      isArtifactCached(DefaultConfig.gateRepo, DefaultConfig.gateLabelsPath),
+    ]);
+    gateDownloaded = Boolean(gateModel && gateLabels);
+    ocrDownloaded = ocrCached;
+    return ocrCached && gateDownloaded;
   }
 
   async function startOcrDownload() {
@@ -400,46 +403,45 @@
     ocrProgressText = "Preparing download...";
     try {
       if (selectedOcrEngine === "manga-ocr") {
-        ocrProgressText = "Downloading encoder (1/2)...";
+        ocrProgressText = "Downloading Manga-OCR encoder (1/3)...";
         await fetchAndCacheWithProgress(
           DefaultConfig.mangaOcrRepo,
           "encoder_model.onnx",
           (loaded, total) => {
-            const pct = total > 0 ? Math.round((loaded / total) * 50) : 0;
+            const pct = total > 0 ? Math.round((loaded / total) * 40) : 0;
             ocrProgress = pct;
             ocrProgressText = `Encoder: ${(loaded / 1024 / 1024).toFixed(1)} MB${total > 0 ? ` / ${(total / 1024 / 1024).toFixed(1)} MB` : ""}`;
           },
         );
-        ocrProgressText = "Downloading decoder (2/2)...";
+        ocrProgressText = "Downloading Manga-OCR decoder (2/3)...";
         await fetchAndCacheWithProgress(
           DefaultConfig.mangaOcrRepo,
           "decoder_model.onnx",
           (loaded, total) => {
-            const pct = total > 0 ? 50 + Math.round((loaded / total) * 50) : 50;
+            const pct = total > 0 ? 40 + Math.round((loaded / total) * 40) : 40;
             ocrProgress = pct;
             ocrProgressText = `Decoder: ${(loaded / 1024 / 1024).toFixed(1)} MB${total > 0 ? ` / ${(total / 1024 / 1024).toFixed(1)} MB` : ""}`;
           },
         );
         await fetchAndCacheWithProgress(DefaultConfig.mangaOcrRepo, "vocab.txt");
       } else if (selectedOcrEngine === "ppocrv6-manga") {
+        ocrProgressText = "Downloading PP-OCRv6 Manga (1/2)...";
         await fetchAndCacheWithProgress(
           env.ppocrv6MangaRepo,
           "ppocr-rec-v6-small-manga.onnx",
           (loaded, total) => {
-            const pct = total > 0 ? Math.round((loaded / total) * 100) : 0;
+            const pct = total > 0 ? Math.round((loaded / total) * 80) : 0;
             ocrProgress = pct;
-            ocrProgressText = `${(loaded / 1024 / 1024).toFixed(1)} MB${total > 0 ? ` / ${(total / 1024 / 1024).toFixed(1)} MB` : ""}`;
+            ocrProgressText = `PP-OCRv6: ${(loaded / 1024 / 1024).toFixed(1)} MB${total > 0 ? ` / ${(total / 1024 / 1024).toFixed(1)} MB` : ""}`;
           },
         );
       } else {
-        const packProgress = (step: number, steps: number) => (loaded: number, total: number) => {
-          const base = ((step - 1) / steps) * 100;
-          const pct = total > 0 ? Math.round((loaded / total) * (100 / steps)) : 0;
-          ocrProgress = Math.min(100, Math.round(base + pct));
-          ocrProgressText = `Pack ${step}/${steps}: ${(loaded / 1024 / 1024).toFixed(1)} MB${total > 0 ? ` / ${(total / 1024 / 1024).toFixed(1)} MB` : ""}`;
+        const packProgress = (stepIndex: number, steps: number) => (loaded: number, total: number) => {
+          const base = ((stepIndex - 1) / steps) * 80;
+          const pct = total > 0 ? Math.round((loaded / total) * (80 / steps)) : 0;
+          ocrProgress = Math.min(80, Math.round(base + pct));
+          ocrProgressText = `OCR Pack ${stepIndex}/${steps}: ${(loaded / 1024 / 1024).toFixed(1)} MB${total > 0 ? ` / ${(total / 1024 / 1024).toFixed(1)} MB` : ""}`;
         };
-        // Latin first (Auto-Detect default), then Chinese/Japanese — the gate
-        // switches between them without mid-translate downloads.
         await fetchAndCacheWithProgress(
           DefaultConfig.ocrRepo,
           DefaultConfig.ocrModelPath("latin"),
@@ -462,9 +464,27 @@
         );
       }
       ocrDownloaded = true;
+
+      // Always download language gate model (~3.7 MB)
+      ocrProgressText = "Downloading Language Gate model (~3.7 MB)...";
+      await fetchAndCacheWithProgress(
+        DefaultConfig.gateRepo,
+        DefaultConfig.gateModelPath,
+        (loaded, total) => {
+          const pct = total > 0 ? Math.round((loaded / total) * 20) : 0;
+          ocrProgress = Math.min(99, 80 + pct);
+          ocrProgressText = `Language Gate: ${(loaded / 1024 / 1024).toFixed(1)} MB${total > 0 ? ` / ${(total / 1024 / 1024).toFixed(1)} MB` : ""}`;
+        },
+      );
+      await fetchAndCacheWithProgress(
+        DefaultConfig.gateRepo,
+        DefaultConfig.gateLabelsPath,
+      );
+      gateDownloaded = true;
       ocrProgress = 100;
+      ocrProgressText = "All models ready.";
     } catch (err: any) {
-      ocrError = err?.message ?? "Failed to download OCR model weights.";
+      ocrError = err?.message ?? "Failed to download OCR / Language Gate model weights.";
     } finally {
       ocrDownloading = false;
     }
@@ -547,7 +567,6 @@
     }
     await storage.setItems([
       { key: "local:is-first-run", value: false },
-      { key: "sync:share-data", value: shareData },
       { key: "sync:detection-model", value: detectionModel },
       { key: "sync:current-mode", value: selectedMode },
       { key: "sync:ocr-engine", value: selectedOcrEngine },
@@ -594,83 +613,119 @@
 </script>
 
 <main
-  class="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 flex items-center justify-center p-6 font-sans"
+  class="min-h-screen bg-[var(--bg-void-0)] text-[var(--text-primary)] flex items-center justify-center p-4 sm:p-6 font-body transition-colors"
 >
-  <div class="w-full max-w-xl">
+  <div class="w-full max-w-[540px]">
     <!-- Model-only mode: minimal wrapper, no wizard chrome -->
     {#if isModelOnlyMode}
       <div
-        in:fade={{ duration: 300 }}
-        class="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-xl"
+        in:fade={{ duration: 250 }}
+        class="bg-[var(--surface-panel)] rounded-2xl border border-[var(--border-line)] shadow-[var(--shadow-panel)] overflow-hidden"
       >
-        <div class="p-8 space-y-6">
+        <div class="p-6 sm:p-7 space-y-5">
           <div class="flex items-center gap-3">
-            <div class="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-xl">
-              <Download size={20} class="text-blue-500" />
+            <div class="p-2.5 bg-[var(--bg-void)] border border-[var(--border-line)] text-[var(--accent-cyan)] rounded-xl">
+              <Download size={18} />
             </div>
             <div>
-              <h2 class="text-lg font-bold">Update Language Model</h2>
-              <p class="text-sm text-zinc-500 dark:text-zinc-400">
-                Downloading the new local inference model.
+              <h2 class="text-base font-display font-bold text-[var(--text-primary)]">Update Language Model</h2>
+              <p class="text-xs text-[var(--text-muted)]">
+                Downloading new local inference model weights for WebGPU.
               </p>
             </div>
           </div>
 
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-2 gap-2.5">
             {#each DefaultConfig.llmModels as model}
               <button
+                type="button"
                 onclick={() => (selectedLlmModel = model.id)}
                 disabled={llmDownloading}
-                class="p-4 rounded-xl border-2 text-left cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed
+                class="p-3.5 rounded-xl border text-left cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-void)]
                   {selectedLlmModel === model.id
-                  ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                  : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 hover:border-zinc-300 dark:hover:border-zinc-700'}"
+                  ? 'border-[var(--accent-amber)] shadow-[0_0_14px_var(--accent-amber-glow)]'
+                  : 'border-[var(--border-line)] hover:border-[var(--border-line)]/80'}"
               >
-                <p
-                  class="text-sm font-bold mb-0.5 {selectedLlmModel === model.id
-                    ? 'text-blue-600 dark:text-blue-400'
-                    : 'text-zinc-800 dark:text-zinc-200'}"
-                >
-                  {model.label}
-                </p>
-                <p class="text-xs text-zinc-500 dark:text-zinc-400 mb-1">
+                <div class="flex items-center justify-between mb-1">
+                  <p
+                    class="text-xs font-display font-bold {selectedLlmModel === model.id
+                      ? 'text-[var(--accent-amber)]'
+                      : 'text-[var(--text-primary)]'}"
+                  >
+                    {model.label}
+                  </p>
+                  <span class="badge-cyber is-amber text-[10px] !py-0.5 !px-1.5 font-mono">
+                    {model.vram} VRAM
+                  </span>
+                </div>
+                <p class="text-[11px] leading-snug {selectedLlmModel === model.id ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}">
                   {model.desc}
                 </p>
-                <span
-                  class="text-[10px] font-bold tracking-wide uppercase px-1.5 py-0.5 rounded-md bg-zinc-200 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400"
-                >
-                  {model.vram} VRAM
-                </span>
               </button>
             {/each}
           </div>
 
+          {#if llmCleaning}
+            <div
+              in:fly={{ y: 6, duration: 200 }}
+              class="flex items-center gap-2.5 p-3 bg-[var(--bg-void)] border border-[var(--accent-amber)]/40 rounded-xl"
+            >
+              <LoaderCircle size={16} class="text-[var(--accent-amber)] animate-spin shrink-0" />
+              <p class="text-xs font-medium text-[var(--accent-amber)]">
+                Cleaning up cached model info...
+              </p>
+            </div>
+          {:else if llmCleaned}
+            <div
+              in:fly={{ y: 6, duration: 200 }}
+              class="flex items-center gap-2.5 p-3 bg-[var(--bg-void)] border border-[var(--accent-emerald)]/40 rounded-xl"
+            >
+              <CircleCheck size={16} class="text-[var(--accent-emerald)] shrink-0" />
+              <p class="text-xs font-medium text-[var(--accent-emerald)]">
+                Cached model removed. You can download again below or close this tab.
+              </p>
+            </div>
+          {/if}
+
+          {#if llmCleanError}
+            <div
+              in:fly={{ y: 4, duration: 200 }}
+              class="flex items-start gap-2.5 p-3 bg-[var(--bg-void)] border border-[var(--accent-rose)]/40 rounded-xl text-[var(--accent-rose)]"
+            >
+              <CircleAlert size={14} class="shrink-0 mt-0.5" />
+              <p class="text-xs leading-snug">{llmCleanError}</p>
+            </div>
+          {/if}
+
           {#if !llmDone}
             <button
+              type="button"
               onclick={startLlmDownload}
               disabled={llmDownloading}
-              class="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-xl transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
+              class="w-full btn-primary !py-2.5 text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
               {#if llmDownloading}
-                <LoaderCircle size={16} class="animate-spin" />
+                <LoaderCircle size={15} class="animate-spin" />
                 Downloading...
               {:else}
-                <Download size={16} />
+                <Download size={15} />
                 Download Model
               {/if}
             </button>
 
             {#if llmDownloading}
-              <div in:fly={{ y: 6, duration: 200 }} class="space-y-1.5">
-                <div
-                  class="h-2 bg-zinc-200 dark:bg-zinc-700 rounded-full overflow-hidden"
-                >
+              <div in:fly={{ y: 6, duration: 200 }} class="space-y-1.5 p-3 rounded-xl bg-[var(--bg-void)] border border-[var(--border-line)]">
+                <div class="flex items-center justify-between text-xs">
+                  <span class="text-[var(--text-muted)]">Downloading weights</span>
+                  <span class="font-mono text-[var(--accent-cyan)] font-bold">{llmProgress}%</span>
+                </div>
+                <div class="h-1.5 bg-[var(--surface-panel)] rounded-full overflow-hidden border border-[var(--border-faint)]">
                   <div
-                    class="h-full bg-blue-500 rounded-full transition-all duration-300"
+                    class="h-full bg-[var(--accent-cyan)] shadow-[0_0_8px_var(--accent-cyan-glow)] rounded-full transition-all duration-300"
                     style="width: {llmProgress}%"
                   ></div>
                 </div>
-                <p class="text-xs text-zinc-500 dark:text-zinc-400">
+                <p class="text-[11px] text-[var(--text-dim)] truncate font-mono">
                   {llmProgressText}
                 </p>
               </div>
@@ -678,20 +733,18 @@
           {:else}
             <div
               in:fly={{ y: 6, duration: 200 }}
-              class="flex items-center gap-3 p-3.5 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl"
+              class="flex items-center gap-2.5 p-3 bg-[var(--bg-void)] border border-[var(--accent-emerald)]/40 rounded-xl"
             >
-              <CircleCheck size={18} class="text-emerald-500 shrink-0" />
-              <p
-                class="text-sm font-medium text-emerald-700 dark:text-emerald-400"
-              >
-                Model downloaded and ready.
+              <CircleCheck size={16} class="text-[var(--accent-emerald)] shrink-0" />
+              <p class="text-xs font-medium text-[var(--accent-emerald)]">
+                Model weights cached and ready.
               </p>
             </div>
           {/if}
 
           {#if llmError}
             <div
-              class="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl text-red-700 dark:text-red-400"
+              class="flex items-start gap-2 p-3 bg-[var(--bg-void)] border border-[var(--accent-rose)]/40 rounded-xl text-[var(--accent-rose)]"
             >
               <CircleAlert size={14} class="shrink-0 mt-0.5" />
               <p class="text-xs leading-snug">{llmError}</p>
@@ -699,289 +752,317 @@
           {/if}
 
           <button
+            type="button"
             onclick={finishSetup}
-            class="w-full border border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600 text-zinc-600 dark:text-zinc-400 font-semibold py-2.5 px-4 rounded-xl transition-all text-sm cursor-pointer"
+            class="w-full btn-ghost text-xs !py-2"
           >
             {llmDone ? "Done" : "Skip"}
           </button>
         </div>
       </div>
     {:else}
-      <!-- Progress bar (hidden on welcome) -->
-      {#if step !== "welcome"}
-        <div
-          in:fade={{ duration: 200 }}
-          class="h-1 bg-zinc-200 dark:bg-zinc-800 rounded-full mb-5 overflow-hidden"
-        >
-          <div
-            class="h-full bg-blue-500 rounded-full transition-all duration-500"
-            style="width: {progressPct}%"
-          ></div>
-        </div>
-      {/if}
-
-      <!-- Main card -->
+      <!-- Main Setup Wizard Card -->
       <div
-        class="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-xl overflow-hidden"
+        class="bg-[var(--surface-panel)] rounded-2xl border border-[var(--border-line)] shadow-[var(--shadow-panel)] overflow-hidden transition-all duration-200"
       >
+        <!-- Card Header with Stepper Info & Integrated Progress Bar -->
+        {#if step !== "welcome"}
+          <div class="px-6 pt-5 pb-3 border-b border-[var(--border-faint)] flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <img src="/icon/48.png" alt="LMT" class="w-5 h-5 rounded object-contain" />
+              <span class="font-display font-semibold text-xs tracking-tight text-[var(--text-muted)]">
+                Setup Wizard
+              </span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="badge-cyber is-cyan">
+                STEP {wizardStepIndex + 1}/{activeWizardSteps.length}
+              </span>
+            </div>
+          </div>
+          <!-- Integrated progress bar -->
+          <div class="h-[2px] bg-[var(--border-faint)] w-full overflow-hidden">
+            <div
+              class="h-full bg-[var(--accent-cyan)] shadow-[0_0_8px_var(--accent-cyan-glow)] transition-all duration-300"
+              style="width: {progressPct}%"
+            ></div>
+          </div>
+        {/if}
+
         {#key step}
-          <div in:fly={{ y: 12, duration: 280 }}>
-            <!-- WELCOME -->
+          <div in:fly={{ y: 8, duration: 240 }} class="p-6 sm:p-7">
+            <!-- ── STEP 1: WELCOME ── -->
             {#if step === "welcome"}
-              <div class="p-8 flex flex-col items-center text-center gap-6">
-                <div class="flex justify-center pt-2">
-                  <img src="/icon/128.png" alt="LMT" class="w-20 h-20" />
+              <div class="flex flex-col items-center text-center gap-5">
+                <div class="relative pt-2">
+                  <div class="absolute -inset-1 rounded-2xl bg-[var(--accent-cyan-glow)] blur-lg opacity-40"></div>
+                  <img src="/icon/128.png" alt="LMT" class="relative w-16 h-16 rounded-xl shadow-[var(--shadow-panel)] object-contain" />
                 </div>
 
-                <div class="space-y-2">
-                  <h1 class="text-4xl font-bold tracking-tight">Libre Manga Translator</h1>
-                  <p class="text-zinc-500 dark:text-zinc-400 text-sm">
-                    Local-first manga translation powered by AI.
+                <div class="space-y-1.5">
+                  <div class="inline-flex items-center gap-1.5">
+                    <h1 class="text-xl sm:text-2xl font-display font-bold tracking-tight text-[var(--text-primary)]">
+                      Libre Manga Translator
+                    </h1>
+                  </div>
+                  <p class="text-xs text-[var(--text-muted)] max-w-sm mx-auto leading-relaxed">
+                    Local-first, privacy-respecting manga translation directly in your browser.
                   </p>
                 </div>
 
-                <div
-                  class="bg-zinc-100 dark:bg-zinc-800 rounded-xl p-4 text-left w-full space-y-3 border border-zinc-200 dark:border-zinc-700"
-                >
-                  {#each [{ icon: ShieldCheck, title: "Private by default", body: "Detection never sends images anywhere. Nothing leaves your browser unless you pick Gemini or API Mode; improvement data is opt-in." }, { icon: Cpu, title: "WebGPU - on-device (default)", body: "YOLO26 detection + PaddleOCR + Qwen3 via WebLLM run locally (WebGPU for translation, CPU/WASM for detection/OCR). Offline after download." }, { icon: Cloud, title: "Gemini cloud (opt-in)", body: "Sends the annotated image straight from your browser to the Gemini API. No proxy; key stored locally." }, { icon: Server, title: "API Mode - your server choice", body: "Ollama, LM Studio, or any OpenAI-compatible endpoint. OCR stays local; only extracted text is sent." }] as feature}
-                    <div class="flex items-start gap-3">
-                      <div
-                        class="p-1.5 bg-blue-100 dark:bg-blue-900/30 rounded-lg shrink-0 mt-0.5"
-                      >
-                        <feature.icon size={14} class="text-blue-500" />
-                      </div>
-                      <div>
-                        <p
-                          class="text-xs font-semibold text-zinc-800 dark:text-zinc-200"
-                        >
-                          {feature.title}
-                        </p>
-                        <p
-                          class="text-xs text-zinc-500 dark:text-zinc-400 leading-snug"
-                        >
-                          {feature.body}
-                        </p>
-                      </div>
+                <!-- 4 Highlight Cards in 2x2 grid -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-left w-full">
+                  <div class="p-3 rounded-xl bg-[var(--bg-void)] border border-[var(--border-line)] flex items-start gap-2.5">
+                    <div class="p-1.5 rounded-lg bg-[var(--surface-panel)] border border-[var(--border-faint)] text-[var(--accent-cyan)] shrink-0 mt-0.5">
+                      <ShieldCheck size={14} />
                     </div>
-                  {/each}
+                    <div>
+                      <p class="text-xs font-display font-bold text-[var(--text-primary)]">Private by Default</p>
+                      <p class="text-[11px] text-[var(--text-muted)] leading-tight mt-0.5">
+                        Zero background telemetry. Detection & OCR never leave your machine.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div class="p-3 rounded-xl bg-[var(--bg-void)] border border-[var(--border-line)] flex items-start gap-2.5">
+                    <div class="p-1.5 rounded-lg bg-[var(--surface-panel)] border border-[var(--border-faint)] text-[var(--accent-amber)] shrink-0 mt-0.5">
+                      <Cpu size={14} />
+                    </div>
+                    <div>
+                      <p class="text-xs font-display font-bold text-[var(--text-primary)]">WebGPU On-Device</p>
+                      <p class="text-[11px] text-[var(--text-muted)] leading-tight mt-0.5">
+                        RT-DETR + PaddleOCR + Qwen3 execute locally. Fully functional offline.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div class="p-3 rounded-xl bg-[var(--bg-void)] border border-[var(--border-line)] flex items-start gap-2.5">
+                    <div class="p-1.5 rounded-lg bg-[var(--surface-panel)] border border-[var(--border-faint)] text-[var(--accent-emerald)] shrink-0 mt-0.5">
+                      <Cloud size={14} />
+                    </div>
+                    <div>
+                      <p class="text-xs font-display font-bold text-[var(--text-primary)]">Gemini Cloud Direct</p>
+                      <p class="text-[11px] text-[var(--text-muted)] leading-tight mt-0.5">
+                        High accuracy multimodal translation directly to Google AI Studio.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div class="p-3 rounded-xl bg-[var(--bg-void)] border border-[var(--border-line)] flex items-start gap-2.5">
+                    <div class="p-1.5 rounded-lg bg-[var(--surface-panel)] border border-[var(--border-faint)] text-[var(--accent-cyan)] shrink-0 mt-0.5">
+                      <Server size={14} />
+                    </div>
+                    <div>
+                      <p class="text-xs font-display font-bold text-[var(--text-primary)]">API Mode Server</p>
+                      <p class="text-[11px] text-[var(--text-muted)] leading-tight mt-0.5">
+                        Connect your own Ollama, LM Studio, or OpenAI-compatible endpoint.
+                      </p>
+                    </div>
+                  </div>
                 </div>
 
                 <button
+                  type="button"
                   onclick={() => goTo("privacy")}
-                  class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-xl transition-all active:scale-[0.98] cursor-pointer shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2"
+                  class="w-full btn-primary !py-3 text-xs tracking-wide uppercase font-bold flex items-center justify-center gap-2 cursor-pointer mt-1"
                 >
                   Get Started
-                  <ChevronRight size={18} />
+                  <ChevronRight size={16} />
                 </button>
               </div>
 
-              <!-- PRIVACY -->
+            <!-- ── STEP 2: PRIVACY ── -->
             {:else if step === "privacy"}
-              <div class="p-8 space-y-5">
-                <div class="flex items-center gap-2.5">
-                  <div class="p-1.5 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                    <ShieldCheck size={18} class="text-blue-500" />
+              <div class="space-y-4">
+                <div>
+                  <div class="flex items-center gap-2 mb-1">
+                    <ShieldCheck size={18} class="text-[var(--accent-cyan)]" />
+                    <h2 class="text-base font-display font-bold text-[var(--text-primary)]">
+                      Privacy Policy &amp; Terms
+                    </h2>
                   </div>
-                  <div>
-                    <h2 class="text-lg font-bold">Privacy Policy</h2>
-                    <p class="text-xs text-zinc-500 dark:text-zinc-400">
-                      Read carefully before using the extension.
-                    </p>
-                  </div>
+                  <p class="text-xs text-[var(--text-muted)]">
+                    Local-first transparency. Review data handling practices before continuing.
+                  </p>
                 </div>
 
-                <!-- Scrollable policy area -->
+                <!-- Privacy Guarantee Highlights -->
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="badge-cyber is-emerald text-[10px]">
+                    <Check size={10} /> Local Inference
+                  </span>
+                  <span class="badge-cyber is-cyan text-[10px]">
+                    <Check size={10} /> Zero Tracking
+                  </span>
+                  <span class="badge-cyber is-amber text-[10px]">
+                    <Check size={10} /> Direct Connections
+                  </span>
+                </div>
+
+                <!-- Scrollable Policy Reader -->
                 <div class="relative">
                   <div
-                    class="h-64 overflow-y-auto rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 p-4 scroll-smooth"
+                    class="h-[320px] overflow-y-auto rounded-xl bg-[var(--bg-void)] border border-[var(--border-line)] p-4 custom-scrollbar scroll-smooth"
                   >
                     {#if privacyLoading}
-                      <div
-                        class="flex items-center justify-center h-full gap-2 text-zinc-400"
-                      >
-                        <LoaderCircle size={20} class="animate-spin" />
-                        <span class="text-sm">Loading policy...</span>
+                      <div class="flex flex-col items-center justify-center h-full gap-2 text-[var(--text-muted)]">
+                        <LoaderCircle size={20} class="animate-spin text-[var(--accent-cyan)]" />
+                        <span class="text-xs font-mono">Loading policy...</span>
                       </div>
                     {:else if privacyFetchError}
-                      <div
-                        class="flex flex-col items-center justify-center h-full gap-3 text-zinc-500"
-                      >
-                        <CircleAlert size={24} />
-                        <p class="text-sm">
-                          Could not load the privacy policy.
+                      <div class="flex flex-col items-center justify-center h-full gap-2.5 text-[var(--text-muted)] text-center p-4">
+                        <CircleAlert size={22} class="text-[var(--accent-rose)]" />
+                        <p class="text-xs text-[var(--text-primary)] font-medium">
+                          Could not fetch remote policy document.
+                        </p>
+                        <p class="text-[11px] text-[var(--text-dim)]">
+                          LMT performs 100% on-device processing in WebGPU mode and zero analytics tracking.
                         </p>
                         <button
+                          type="button"
                           onclick={fetchPrivacy}
-                          class="text-xs text-blue-500 hover:text-blue-400 underline cursor-pointer"
+                          class="btn-ghost !py-1 !px-2.5 text-xs cursor-pointer mt-1"
                         >
-                          Try again
+                          Retry
                         </button>
                       </div>
                     {:else}
-                      {@html parsedPrivacy}
+                      <div class="prose-clean">
+                        {@html parsedPrivacy}
+                      </div>
                     {/if}
                   </div>
                   <!-- Fade hint at bottom -->
                   <div
-                    class="absolute bottom-0 left-0 right-0 h-8 bg-linear-to-t from-white dark:from-zinc-900 to-transparent pointer-events-none rounded-b-xl"
+                    class="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-[var(--bg-void)] to-transparent pointer-events-none rounded-b-xl"
                   ></div>
                 </div>
 
-                <!-- Accept policy -->
-                <label class="flex items-start gap-3 cursor-pointer group">
-                  <div class="relative flex items-center mt-0.5 shrink-0">
+                <!-- Accept Checkbox -->
+                <label class="flex items-center gap-3 cursor-pointer group select-none pt-0.5">
+                  <div class="relative flex items-center shrink-0">
                     <input
                       type="checkbox"
                       bind:checked={acceptedPolicy}
                       class="peer sr-only"
                     />
                     <div
-                      class="h-5 w-5 rounded border-2 border-zinc-300 dark:border-zinc-700 peer-checked:bg-blue-500 peer-checked:border-blue-500 transition-all"
-                    ></div>
-                    <Check
-                      size={13}
-                      class="absolute text-white scale-0 peer-checked:scale-100 transition-transform left-0.5"
-                    />
+                      class="h-4.5 w-4.5 rounded-[4px] border border-[var(--border-line)] bg-[var(--bg-void)] peer-checked:bg-[var(--accent-cyan)] peer-checked:border-[var(--accent-cyan)] transition-all flex items-center justify-center"
+                    >
+                      <Check
+                        size={12}
+                        class="text-[#05040b] scale-0 peer-checked:scale-100 transition-transform stroke-[3]"
+                      />
+                    </div>
                   </div>
                   <span
-                    class="text-sm text-zinc-700 dark:text-zinc-300 group-hover:text-blue-500 transition-colors leading-snug"
+                    class="text-xs font-medium text-[var(--text-primary)] group-hover:text-[var(--accent-cyan)] transition-colors"
                   >
-                    I have read and accept the Privacy Policy
+                    I have read and agree to the Privacy Policy
                   </span>
                 </label>
 
-                <!-- Data sharing option -->
-                <div
-                  class="bg-zinc-100 dark:bg-zinc-800 p-4 rounded-xl border border-zinc-200 dark:border-zinc-700"
-                >
-                  <label class="flex items-start gap-3 cursor-pointer group">
-                    <div class="relative flex items-center mt-0.5 shrink-0">
-                      <input
-                        type="checkbox"
-                        bind:checked={shareData}
-                        class="peer sr-only"
-                      />
-                      <div
-                        class="h-5 w-5 rounded border-2 border-zinc-300 dark:border-zinc-700 peer-checked:bg-blue-500 peer-checked:border-blue-500 transition-all"
-                      ></div>
-                      <Check
-                        size={13}
-                        class="absolute text-white scale-0 peer-checked:scale-100 transition-transform left-0.5"
-                      />
-                    </div>
-                    <div>
-                      <p
-                        class="text-sm font-medium text-zinc-700 dark:text-zinc-300 group-hover:text-blue-500 transition-colors"
-                      >
-                        Allow anonymous data sharing
-                      </p>
-                      <p
-                        class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 leading-snug"
-                      >
-                        Share bounding box corrections to help improve the
-                        detection model. No personal data is collected. You can
-                        change this later in Settings.
-                      </p>
-                    </div>
-                  </label>
+                <!-- Actions -->
+                <div class="flex items-center gap-2.5 pt-2 border-t border-[var(--border-faint)]">
+                  <button
+                    type="button"
+                    onclick={() => goTo("welcome")}
+                    class="btn-ghost flex-1 text-xs !py-2.5 cursor-pointer"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onclick={() => goTo("detection")}
+                    disabled={!acceptedPolicy || privacyLoading}
+                    class="btn-primary flex-1 text-xs !py-2.5 font-bold cursor-pointer disabled:bg-none disabled:bg-[var(--surface-panel-alt)] disabled:border-[var(--border-line)] disabled:text-[var(--text-dim)] disabled:opacity-60 disabled:shadow-none disabled:cursor-not-allowed"
+                  >
+                    Accept &amp; Continue
+                    <ChevronRight size={14} />
+                  </button>
                 </div>
-
-                <button
-                  onclick={() => goTo("detection")}
-                  disabled={!acceptedPolicy || privacyLoading}
-                  class="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-300 dark:disabled:bg-zinc-700 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-xl transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
-                >
-                  Accept &amp; Continue
-                  <ChevronRight size={18} />
-                </button>
               </div>
 
-              <!-- DETECTION -->
+            <!-- ── STEP 3: DETECTION ── -->
             {:else if step === "detection"}
-              <div class="p-8 space-y-5">
+              <div class="space-y-4">
                 <div>
-                  <h2 class="text-lg font-bold">Detection Model</h2>
-                  <p class="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-                    Choose the YOLO model used to detect speech bubbles on manga
-                    pages.
+                  <h2 class="text-base font-display font-bold text-[var(--text-primary)]">
+                    Bubble Detection Model
+                  </h2>
+                  <p class="text-xs text-[var(--text-muted)] mt-0.5">
+                    Choose the detection model used to locate text bubbles on pages.
                   </p>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3">
+                <!-- Detection model grid -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   {#each DefaultConfig.detectionModels as model}
                     <button
+                      type="button"
                       onclick={() => (detectionModel = model.id)}
-                      class="p-4 rounded-xl border-2 text-left cursor-pointer transition-all disabled:opacity-60 disabled:cursor-not-allowed
+                      class="p-3.5 rounded-xl border text-left cursor-pointer transition-all disabled:opacity-60 disabled:cursor-not-allowed bg-[var(--bg-void)]
                         {detectionModel === model.id
-                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                        : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 hover:border-zinc-300 dark:hover:border-zinc-700'}"
+                        ? 'border-[var(--accent-cyan)] shadow-[0_0_14px_var(--accent-cyan-glow)]'
+                        : 'border-[var(--border-line)] hover:border-[var(--border-line)]/80'}"
                     >
                       <div class="flex items-center justify-between mb-1">
                         <div class="flex items-center gap-1.5">
                           <Cpu
-                            size={14}
+                            size={13}
                             class={detectionModel === model.id
-                              ? "text-blue-500"
-                              : "text-zinc-500"}
+                              ? "text-[var(--accent-cyan)]"
+                              : "text-[var(--text-dim)]"}
                           />
                           <span
-                            class="text-sm font-bold {detectionModel === model.id
-                              ? 'text-blue-600 dark:text-blue-400'
-                              : 'text-zinc-700 dark:text-zinc-300'}"
+                            class="text-xs font-display font-bold {detectionModel === model.id
+                              ? 'text-[var(--accent-cyan)]'
+                              : 'text-[var(--text-primary)]'}"
                           >
                             {model.label}
                           </span>
                         </div>
-                        <span class="text-[10px] font-mono text-zinc-400">{model.size}</span>
+                        <span class="text-[10px] font-mono {detectionModel === model.id ? 'text-[var(--accent-cyan)] font-semibold' : 'text-[var(--text-dim)]'}">{model.size}</span>
                       </div>
-                      <p
-                        class="text-xs text-zinc-500 dark:text-zinc-400 leading-snug"
-                      >
+                      <p class="text-[11px] leading-snug {detectionModel === model.id ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}">
                         {model.desc}
                       </p>
                     </button>
                   {/each}
                 </div>
 
-                <!-- Prefetch status -->
+                <!-- Prefetch Status Panel -->
                 <div
-                  class="flex flex-col gap-2 p-3.5 rounded-xl border transition-colors
+                  class="flex flex-col gap-2 p-3.5 rounded-xl border transition-colors bg-[var(--bg-void)]
                     {detectionPrefetched
-                    ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20'
+                    ? 'border-[var(--accent-emerald)]/40'
                     : detectionError
-                      ? 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'
+                      ? 'border-[var(--accent-rose)]/40'
                       : detectionPrefetching
-                        ? 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20'
-                        : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50'}"
+                        ? 'border-[var(--accent-cyan)]/40'
+                        : 'border-[var(--border-line)]'}"
                 >
-                  <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-2">
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="flex items-center gap-2 min-w-0">
                       {#if detectionPrefetching}
-                        <LoaderCircle
-                          size={15}
-                          class="animate-spin text-blue-500 shrink-0"
-                        />
-                        <span class="text-xs font-semibold text-blue-700 dark:text-blue-300">
-                          Downloading detection model weights...
+                        <LoaderCircle size={15} class="animate-spin text-[var(--accent-cyan)] shrink-0" />
+                        <span class="text-xs font-medium text-[var(--accent-cyan)] truncate">
+                          Downloading detector weights...
                         </span>
                       {:else if detectionPrefetched}
-                        <CircleCheck size={15} class="text-emerald-500 shrink-0" />
-                        <span
-                          class="text-xs text-emerald-700 dark:text-emerald-400 font-medium"
-                        >
-                          Model cached and ready to use.
+                        <CircleCheck size={15} class="text-[var(--accent-emerald)] shrink-0" />
+                        <span class="text-xs font-medium text-[var(--text-primary)] truncate">
+                          Model cached and ready for inference.
                         </span>
                       {:else if detectionError}
-                        <CircleAlert size={15} class="text-red-500 shrink-0" />
-                        <span
-                          class="text-xs text-red-700 dark:text-red-400 flex-1"
-                        >
+                        <CircleAlert size={15} class="text-[var(--accent-rose)] shrink-0" />
+                        <span class="text-xs text-[var(--accent-rose)] truncate">
                           {detectionError}
                         </span>
                       {:else}
-                        <Download size={15} class="text-zinc-500 shrink-0" />
-                        <span class="text-xs text-zinc-600 dark:text-zinc-400">
-                          Model not yet cached in local storage.
+                        <Download size={15} class="text-[var(--text-dim)] shrink-0" />
+                        <span class="text-xs text-[var(--text-muted)] truncate">
+                          Weights not yet downloaded.
                         </span>
                       {/if}
                     </div>
@@ -990,7 +1071,7 @@
                       <button
                         type="button"
                         onclick={prefetchDetection}
-                        class="px-2.5 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-sm transition-all cursor-pointer whitespace-nowrap shrink-0"
+                        class="btn-primary !py-1 !px-2.5 text-xs font-bold shrink-0 cursor-pointer"
                       >
                         Download &amp; Cache
                       </button>
@@ -998,7 +1079,7 @@
                       <button
                         type="button"
                         onclick={prefetchDetection}
-                        class="px-2.5 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-sm transition-all cursor-pointer whitespace-nowrap shrink-0"
+                        class="btn-ghost !py-1 !px-2.5 text-xs shrink-0 cursor-pointer"
                       >
                         Retry
                       </button>
@@ -1006,30 +1087,35 @@
                   </div>
 
                   {#if detectionPrefetching}
-                    <div class="w-full bg-blue-200/50 dark:bg-blue-950 rounded-full h-1.5 overflow-hidden">
-                      <div
-                        class="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
-                        style="width: {detectionProgress}%"
-                      ></div>
-                    </div>
-                    <div class="flex justify-between text-[10px] text-zinc-500 dark:text-zinc-400 font-mono">
-                      <span>{detectionProgressText}</span>
-                      <span>{detectionProgress}%</span>
+                    <div class="space-y-1">
+                      <div class="h-1.5 bg-[var(--surface-panel)] rounded-full overflow-hidden border border-[var(--border-faint)]">
+                        <div
+                          class="h-full bg-[var(--accent-cyan)] shadow-[0_0_8px_var(--accent-cyan-glow)] rounded-full transition-all duration-300"
+                          style="width: {detectionProgress}%"
+                        ></div>
+                      </div>
+                      <div class="flex justify-between text-[10px] text-[var(--text-dim)] font-mono">
+                        <span>{detectionProgressText}</span>
+                        <span>{detectionProgress}%</span>
+                      </div>
                     </div>
                   {/if}
                 </div>
 
-                <div class="flex gap-3">
+                <!-- Navigation -->
+                <div class="flex items-center gap-2.5 pt-2 border-t border-[var(--border-faint)]">
                   <button
-                    onclick={() => (step = "privacy")}
-                    class="flex-1 border border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600 text-zinc-600 dark:text-zinc-400 font-semibold py-2.5 px-4 rounded-xl transition-all text-sm cursor-pointer"
+                    type="button"
+                    onclick={() => goTo("privacy")}
+                    class="btn-ghost flex-1 text-xs !py-2.5 cursor-pointer"
                   >
                     Back
                   </button>
                   <button
+                    type="button"
                     onclick={() => goTo("mode")}
                     disabled={!detectionPrefetched || detectionPrefetching}
-                    class="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-2.5 px-4 rounded-xl transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
+                    class="btn-primary flex-1 text-xs !py-2.5 font-bold cursor-pointer disabled:bg-none disabled:bg-[var(--surface-panel-alt)] disabled:border-[var(--border-line)] disabled:text-[var(--text-dim)] disabled:opacity-60 disabled:shadow-none disabled:cursor-not-allowed"
                   >
                     {#if detectionPrefetching}
                       <LoaderCircle size={14} class="animate-spin" />
@@ -1042,275 +1128,136 @@
                 </div>
               </div>
 
-              <!-- MODE -->
+            <!-- ── STEP 4: MODE SELECTION ── -->
             {:else if step === "mode"}
-              <div class="p-8 space-y-5">
+              <div class="space-y-4">
                 <div>
-                  <h2 class="text-lg font-bold">Translation Mode</h2>
-                  <p class="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-                    Choose how translations are processed by default.
+                  <h2 class="text-base font-display font-bold text-[var(--text-primary)]">
+                    Translation Mode
+                  </h2>
+                  <p class="text-xs text-[var(--text-muted)] mt-0.5">
+                    Select your primary translation engine. You can change this anytime from the popup.
                   </p>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3">
+                <!-- 3 Stacked Selection Rows -->
+                <div class="space-y-2.5">
+                  <!-- WebGPU -->
                   <button
-                    onclick={() => {
-                      selectedMode = "webgpu";
-                      goTo("llm");
-                    }}
-                    class="group p-4 rounded-xl border-2 text-left cursor-pointer transition-all border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 hover:border-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 dark:hover:border-amber-400"
+                    type="button"
+                    onclick={() => (selectedMode = "webgpu")}
+                    class="w-full p-3.5 rounded-xl border text-left cursor-pointer transition-all flex items-center justify-between gap-3 bg-[var(--bg-void)]
+                      {selectedMode === 'webgpu'
+                      ? 'border-[var(--accent-amber)] shadow-[0_0_14px_var(--accent-amber-glow)]'
+                      : 'border-[var(--border-line)] hover:border-[var(--border-line)]/80'}"
                   >
-                    <div class="flex items-center gap-2 mb-2">
-                      <Server
-                        size={16}
-                        class="transition-colors text-zinc-500 group-hover:text-amber-500"
-                      />
-                      <span
-                        class="text-sm font-bold transition-colors text-zinc-700 dark:text-zinc-300 group-hover:text-amber-600 dark:group-hover:text-amber-400"
-                      >
-                        WebGPU
-                      </span>
-                    </div>
-                    <p
-                      class="text-xs text-zinc-500 dark:text-zinc-400 leading-snug"
-                    >
-                      Fully on-device via WebLLM. Private, works offline after
-                      model download.
-                    </p>
-                  </button>
-
-                  <button
-                    onclick={() => {
-                      selectedMode = "gemini";
-                      goTo("gemini");
-                    }}
-                    class="group p-4 rounded-xl border-2 text-left cursor-pointer transition-all border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 hover:border-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 dark:hover:border-emerald-400"
-                  >
-                    <div class="flex items-center gap-2 mb-2">
-                      <Cloud
-                        size={16}
-                        class="transition-colors text-zinc-500 group-hover:text-emerald-500"
-                      />
-                      <span
-                        class="text-sm font-bold transition-colors text-zinc-700 dark:text-zinc-300 group-hover:text-emerald-600 dark:group-hover:text-emerald-400"
-                      >
-                        Gemini
-                      </span>
-                    </div>
-                    <p
-                      class="text-xs text-zinc-500 dark:text-zinc-400 leading-snug"
-                    >
-                      Uses Google Gemini via your own API key for higher
-                      quality.
-                    </p>
-                  </button>
-
-                  <button
-                    onclick={() => {
-                      selectedMode = "api";
-                      goTo("api");
-                    }}
-                    class="group p-4 rounded-xl border-2 text-left cursor-pointer transition-all border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 hover:border-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/20 dark:hover:border-sky-400"
-                  >
-                    <div class="flex items-center gap-2 mb-2">
-                      <Zap
-                        size={16}
-                        class="transition-colors text-zinc-500 group-hover:text-sky-500"
-                      />
-                      <span
-                        class="text-sm font-bold transition-colors text-zinc-700 dark:text-zinc-300 group-hover:text-sky-600 dark:group-hover:text-sky-400"
-                      >
-                        API Mode
-                      </span>
-                    </div>
-                    <p
-                      class="text-xs text-zinc-500 dark:text-zinc-400 leading-snug"
-                    >
-                      Connect your own LLM server (Ollama, LM Studio, OpenAI).
-                      OCR stays local.
-                    </p>
-                  </button>
-                </div>
-
-                <button
-                  onclick={() => (step = "detection")}
-                  class="flex-1 border border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600 text-zinc-600 dark:text-zinc-400 font-semibold py-2.5 px-4 rounded-xl transition-all text-sm cursor-pointer"
-                >
-                  Back
-                </button>
-              </div>
-            {:else if step === "gemini"}
-              <div class="p-8 space-y-5">
-                <div in:fly={{ y: 8, duration: 200 }} class="space-y-2">
-                  <label
-                    for="setup-gemini-key"
-                    class="text-xs font-bold uppercase tracking-widest text-zinc-500 dark:text-zinc-400 ml-1"
-                  >
-                    Gemini API Key
-                  </label>
-                  <div class="relative">
-                    <input
-                      id="setup-gemini-key"
-                      type={showKey ? "text" : "password"}
-                      bind:value={geminiKey}
-                      placeholder="AIzaSy..."
-                      class="w-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 pr-11 text-sm focus:ring-1 focus:ring-blue-500 outline-none transition-all"
-                    />
-                    <button
-                      type="button"
-                      onclick={() => (showKey = !showKey)}
-                      class="absolute inset-y-0 right-0 flex items-center pr-3 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors focus:outline-none cursor-pointer"
-                      aria-label={showKey ? "Hide key" : "Show key"}
-                    >
-                      {#if showKey}
-                        <EyeOff size={16} />
-                      {:else}
-                        <Eye size={16} />
-                      {/if}
-                    </button>
-                  </div>
-                  <p class="text-xs text-zinc-500 dark:text-zinc-400 ml-1">
-                    Your key is stored locally and sent only to Google. It never
-                    touches LMT servers.
-                  </p>
-                </div>
-
-                <div class="flex gap-3 pt-2">
-                  <button
-                    onclick={() => (step = "mode")}
-                    class="flex-1 border border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600 text-zinc-600 dark:text-zinc-400 font-semibold py-2.5 px-4 rounded-xl transition-all text-sm cursor-pointer"
-                  >
-                    Back
-                  </button>
-                  <button
-                    onclick={finishSetup}
-                    disabled={!geminiKey}
-                    class="flex-1 bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20 disabled:opacity-50 disabled:cursor-not-allowed font-bold py-2.5 px-4 rounded-xl transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
-                  >
-                    Complete Setup
-                    <ChevronRight size={14} />
-                  </button>
-                </div>
-              </div>
-
-              <!-- API MODE -->
-            {:else if step === "api"}
-              <div class="p-8 space-y-5">
-                <div>
-                  <h2 class="text-lg font-bold">API Mode Server</h2>
-                  <p class="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-                    Connect your own LLM server (Ollama, LM Studio, or any
-                    OpenAI-compatible endpoint). OCR still runs locally - only
-                    extracted text is sent.
-                  </p>
-                </div>
-
-                <div class="space-y-4">
-                  <div class="space-y-1.5">
-                    <label
-                      for="setup-server-host"
-                      class="text-xs font-bold uppercase tracking-widest text-zinc-500 dark:text-zinc-400 ml-1"
-                    >
-                      Server URL
-                    </label>
-                    <input
-                      id="setup-server-host"
-                      type="text"
-                      bind:value={serverHost}
-                      placeholder="http://127.0.0.1:11434/v1"
-                      class="w-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 text-sm focus:ring-1 focus:ring-blue-500 outline-none transition-all font-mono"
-                    />
-                    <p class="text-xs text-zinc-500 dark:text-zinc-400 ml-1">
-                      Ollama: <code>http://127.0.0.1:11434/v1</code> &middot;
-                      LM Studio:
-                      <code>http://127.0.0.1:1234/api/v1</code>
-                    </p>
-                  </div>
-
-                  <div class="grid grid-cols-2 gap-3">
-                    <div class="space-y-1.5">
-                      <label
-                        for="setup-server-schema"
-                        class="text-xs font-bold uppercase tracking-widest text-zinc-500 dark:text-zinc-400 ml-1"
-                      >
-                        Schema
-                      </label>
-                      <select
-                        id="setup-server-schema"
-                        bind:value={serverSchema}
-                        class="w-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 text-sm outline-none cursor-pointer"
-                      >
-                        <option value="openai">OpenAI-compatible</option>
-                        <option value="lmstudio">LM Studio</option>
-                      </select>
-                    </div>
-                    <div class="space-y-1.5">
-                      <label
-                        for="setup-server-model"
-                        class="text-xs font-bold uppercase tracking-widest text-zinc-500 dark:text-zinc-400 ml-1"
-                      >
-                        Model
-                      </label>
-                      <input
-                        id="setup-server-model"
-                        type="text"
-                        bind:value={serverModel}
-                        placeholder="e.g. qwen2.5:7b"
-                        class="w-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 text-sm focus:ring-1 focus:ring-blue-500 outline-none transition-all"
-                      />
-                    </div>
-                  </div>
-
-                  <div class="space-y-2">
-                    <label class="flex items-center gap-3 cursor-pointer group">
-                      <input
-                        type="checkbox"
-                        bind:checked={useServerApiKey}
-                        class="peer sr-only"
-                      />
-                      <div
-                        class="h-5 w-5 rounded border-2 border-zinc-300 dark:border-zinc-700 peer-checked:bg-blue-500 peer-checked:border-blue-500 transition-all"
-                      ></div>
-                      <span
-                        class="text-sm text-zinc-700 dark:text-zinc-300 group-hover:text-blue-500 transition-colors"
-                      >
-                        Use API key
-                      </span>
-                    </label>
-                    {#if useServerApiKey}
-                      <div class="relative">
-                        <input
-                          type={showKey ? "text" : "password"}
-                          bind:value={serverApiKey}
-                          placeholder="API key (Bearer)"
-                          class="w-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl p-3 pr-11 text-sm focus:ring-1 focus:ring-blue-500 outline-none transition-all"
-                        />
-                        <button
-                          type="button"
-                          onclick={() => (showKey = !showKey)}
-                          class="absolute inset-y-0 right-0 flex items-center pr-3 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors focus:outline-none cursor-pointer"
-                          aria-label={showKey ? "Hide key" : "Show key"}
-                        >
-                          {#if showKey}<EyeOff size={16} />{:else}<Eye
-                              size={16}
-                            />{/if}
-                        </button>
+                    <div class="flex items-start gap-3 min-w-0">
+                      <div class="p-2 rounded-lg bg-[var(--surface-panel)] border border-[var(--border-faint)] text-[var(--accent-amber)] shrink-0 mt-0.5">
+                        <Cpu size={18} />
                       </div>
-                    {/if}
-                  </div>
+                      <div class="min-w-0">
+                        <div class="flex items-center gap-2">
+                          <span class="text-xs font-display font-bold text-[var(--text-primary)]">
+                            WebGPU (On-Device)
+                          </span>
+                          <span class="badge-cyber is-amber text-[9px] !py-0.2 !px-1.5">
+                            100% Private
+                          </span>
+                        </div>
+                        <p class="text-[11px] leading-snug mt-1 {selectedMode === 'webgpu' ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}">
+                          Runs offline in your browser via WebLLM. Zero text or images sent outside your PC.
+                        </p>
+                      </div>
+                    </div>
+                    <div class="w-4 h-4 rounded-full border border-[var(--border-line)] flex items-center justify-center shrink-0 {selectedMode === 'webgpu' ? 'border-[var(--accent-amber)]' : ''}">
+                      {#if selectedMode === 'webgpu'}
+                        <div class="w-2 h-2 rounded-full bg-[var(--accent-amber)] shadow-[0_0_6px_var(--accent-amber-glow)]"></div>
+                      {/if}
+                    </div>
+                  </button>
+
+                  <!-- Gemini -->
+                  <button
+                    type="button"
+                    onclick={() => (selectedMode = "gemini")}
+                    class="w-full p-3.5 rounded-xl border text-left cursor-pointer transition-all flex items-center justify-between gap-3 bg-[var(--bg-void)]
+                      {selectedMode === 'gemini'
+                      ? 'border-[var(--accent-emerald)] shadow-[0_0_14px_var(--accent-emerald-glow)]'
+                      : 'border-[var(--border-line)] hover:border-[var(--border-line)]/80'}"
+                  >
+                    <div class="flex items-start gap-3 min-w-0">
+                      <div class="p-2 rounded-lg bg-[var(--surface-panel)] border border-[var(--border-faint)] text-[var(--accent-emerald)] shrink-0 mt-0.5">
+                        <Cloud size={18} />
+                      </div>
+                      <div class="min-w-0">
+                        <div class="flex items-center gap-2">
+                          <span class="text-xs font-display font-bold text-[var(--text-primary)]">
+                            Gemini Cloud Direct
+                          </span>
+                          <span class="badge-cyber is-emerald text-[9px] !py-0.2 !px-1.5">
+                            Fast &amp; Accurate
+                          </span>
+                        </div>
+                        <p class="text-[11px] leading-snug mt-1 {selectedMode === 'gemini' ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}">
+                          Sends annotated bubbles straight to Google Gemini API using your free API key.
+                        </p>
+                      </div>
+                    </div>
+                    <div class="w-4 h-4 rounded-full border border-[var(--border-line)] flex items-center justify-center shrink-0 {selectedMode === 'gemini' ? 'border-[var(--accent-emerald)]' : ''}">
+                      {#if selectedMode === 'gemini'}
+                        <div class="w-2 h-2 rounded-full bg-[var(--accent-emerald)] shadow-[0_0_6px_var(--accent-emerald-glow)]"></div>
+                      {/if}
+                    </div>
+                  </button>
+
+                  <!-- API Mode -->
+                  <button
+                    type="button"
+                    onclick={() => (selectedMode = "api")}
+                    class="w-full p-3.5 rounded-xl border text-left cursor-pointer transition-all flex items-center justify-between gap-3 bg-[var(--bg-void)]
+                      {selectedMode === 'api'
+                      ? 'border-[var(--accent-cyan)] shadow-[0_0_14px_var(--accent-cyan-glow)]'
+                      : 'border-[var(--border-line)] hover:border-[var(--border-line)]/80'}"
+                  >
+                    <div class="flex items-start gap-3 min-w-0">
+                      <div class="p-2 rounded-lg bg-[var(--surface-panel)] border border-[var(--border-faint)] text-[var(--accent-cyan)] shrink-0 mt-0.5">
+                        <Server size={18} />
+                      </div>
+                      <div class="min-w-0">
+                        <div class="flex items-center gap-2">
+                          <span class="text-xs font-display font-bold text-[var(--text-primary)]">
+                            API Mode (Self-Hosted)
+                          </span>
+                          <span class="badge-cyber is-cyan text-[9px] !py-0.2 !px-1.5">
+                            Custom Server
+                          </span>
+                        </div>
+                        <p class="text-[11px] leading-snug mt-1 {selectedMode === 'api' ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}">
+                          Connect Llama.cpp, Ollama, LM Studio, Jan or any OpenAI Compatible. OCR stays local; text only is sent.
+                        </p>
+                      </div>
+                    </div>
+                    <div class="w-4 h-4 rounded-full border border-[var(--border-line)] flex items-center justify-center shrink-0 {selectedMode === 'api' ? 'border-[var(--accent-cyan)]' : ''}">
+                      {#if selectedMode === 'api'}
+                        <div class="w-2 h-2 rounded-full bg-[var(--accent-cyan)] shadow-[0_0_6px_var(--accent-cyan-glow)]"></div>
+                      {/if}
+                    </div>
+                  </button>
                 </div>
 
-                <div class="flex gap-3 pt-2">
+                <!-- Navigation -->
+                <div class="flex items-center gap-2.5 pt-2 border-t border-[var(--border-faint)]">
                   <button
-                    onclick={() => (step = "mode")}
-                    class="flex-1 border border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600 text-zinc-600 dark:text-zinc-400 font-semibold py-2.5 px-4 rounded-xl transition-all text-sm cursor-pointer"
+                    type="button"
+                    onclick={() => goTo("detection")}
+                    class="btn-ghost flex-1 text-xs !py-2.5 cursor-pointer"
                   >
                     Back
                   </button>
                   <button
-                    onclick={() => goTo("ocr")}
-                    disabled={!serverHost.trim() || !serverModel.trim()}
-                    class="flex-1 bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20 disabled:opacity-50 disabled:cursor-not-allowed font-bold py-2.5 px-4 rounded-xl transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
+                    type="button"
+                    onclick={() => goTo(selectedMode === "gemini" ? "gemini" : selectedMode === "api" ? "api" : "llm")}
+                    class="btn-primary flex-1 text-xs !py-2.5 font-bold cursor-pointer"
                   >
                     Continue
                     <ChevronRight size={14} />
@@ -1318,138 +1265,348 @@
                 </div>
               </div>
 
-              <!-- LLM DOWNLOAD -->
-            {:else if step === "llm"}
-              <div class="p-8 space-y-5">
+            <!-- ── STEP 5A: GEMINI SETUP ── -->
+            {:else if step === "gemini"}
+              <div class="space-y-4">
                 <div>
-                  <h2 class="text-lg font-bold">Language Model</h2>
-                  <p class="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-                    Download a local LLM for on-device translation via WebLLM.
-                    {#if selectedMode !== "webgpu"}
-                      You can skip this since Gemini or API mode is active.
-                    {/if}
+                  <h2 class="text-base font-display font-bold text-[var(--text-primary)]">
+                    Google Gemini Setup
+                  </h2>
+                  <p class="text-xs text-[var(--text-muted)] mt-0.5">
+                    Connect directly to Gemini using your personal API key.
                   </p>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3">
+                <!-- Security & Privacy Assurance Card -->
+                <div class="p-3.5 rounded-xl bg-[var(--bg-void)] border border-[var(--border-line)] flex items-start gap-3">
+                  <div class="p-1.5 rounded-lg bg-[var(--surface-panel)] border border-[var(--border-faint)] text-[var(--accent-emerald)] shrink-0 mt-0.5">
+                    <ShieldCheck size={16} />
+                  </div>
+                  <div class="space-y-1">
+                    <p class="text-xs font-display font-bold text-[var(--text-primary)]">
+                      Direct Client Connection
+                    </p>
+                    <p class="text-[11px] text-[var(--text-muted)] leading-relaxed">
+                      Your key is securely stored in your browser's local storage and sent exclusively to Google's official API endpoint. It is never routed through any LMT or third-party servers.
+                    </p>
+                  </div>
+                </div>
+
+                <!-- API Key Input -->
+                <div class="space-y-1.5">
+                  <div class="flex items-center justify-between">
+                    <label
+                      for="setup-gemini-key"
+                      class="kicker is-emerald text-[11px]"
+                    >
+                      Gemini API Key
+                    </label>
+                    <a
+                      href="https://aistudio.google.com/app/apikey"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="inline-flex items-center gap-1 text-[11px] text-[var(--accent-cyan)] hover:underline font-medium"
+                    >
+                      Get free key from AI Studio
+                      <ExternalLink size={10} />
+                    </a>
+                  </div>
+                  <div class="relative">
+                    <input
+                      id="setup-gemini-key"
+                      type={showKey ? "text" : "password"}
+                      bind:value={geminiKey}
+                      placeholder="AIzaSy..."
+                      class="w-full bg-[var(--bg-void)] border border-[var(--border-line)] rounded-xl p-3 pr-11 text-xs font-mono text-[var(--text-primary)] placeholder:text-[var(--text-dim)] focus:border-[var(--accent-emerald)] outline-none transition-all"
+                    />
+                    <button
+                      type="button"
+                      onclick={() => (showKey = !showKey)}
+                      class="absolute inset-y-0 right-0 flex items-center pr-3 text-[var(--text-dim)] hover:text-[var(--text-primary)] transition-colors focus:outline-none cursor-pointer"
+                      aria-label={showKey ? "Hide key" : "Show key"}
+                    >
+                      {#if showKey}
+                        <EyeOff size={15} />
+                      {:else}
+                        <Eye size={15} />
+                      {/if}
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Default Model Badge -->
+                <div class="flex items-center justify-between p-2.5 rounded-lg bg-[var(--bg-void)] border border-[var(--border-faint)] text-xs">
+                  <span class="text-[var(--text-muted)]">Active Model</span>
+                  <span class="badge-cyber is-emerald text-[10px]">
+                    Gemini 3.8 Flash (Default)
+                  </span>
+                </div>
+
+                <!-- Cloud Multimodal Direct Info -->
+                <div class="p-3 rounded-xl bg-[var(--bg-void)] border border-[var(--border-faint)] flex items-start gap-2.5 text-xs text-[var(--text-muted)]">
+                  <Info size={14} class="text-[var(--accent-emerald)] shrink-0 mt-0.5" />
+                  <div class="space-y-0.5">
+                    <p class="font-semibold text-[var(--text-primary)]">Cloud Multimodal Pipeline</p>
+                    <p class="text-[11px] leading-relaxed text-[var(--text-dim)]">
+                      Gemini directly transcribes, identifies scripts, and translates speech bubbles on Google Cloud. Local OCR engines and Language Gate models are bypassed and do not require downloading.
+                    </p>
+                  </div>
+                </div>
+
+                <!-- Navigation -->
+                <div class="flex items-center gap-2.5 pt-2 border-t border-[var(--border-faint)]">
+                  <button
+                    type="button"
+                    onclick={() => goTo("mode")}
+                    class="btn-ghost flex-1 text-xs !py-2.5 cursor-pointer"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onclick={finishSetup}
+                    disabled={!geminiKey.trim()}
+                    class="btn-primary flex-1 text-xs !py-2.5 font-bold cursor-pointer disabled:bg-none disabled:bg-[var(--surface-panel-alt)] disabled:border-[var(--border-line)] disabled:text-[var(--text-dim)] disabled:opacity-60 disabled:shadow-none disabled:cursor-not-allowed"
+                  >
+                    Complete Setup
+                    <ChevronRight size={14} />
+                  </button>
+                </div>
+              </div>
+
+            <!-- ── STEP 5B: API MODE SETUP ── -->
+            {:else if step === "api"}
+              <div class="space-y-4">
+                <div>
+                  <h2 class="text-base font-display font-bold text-[var(--text-primary)]">
+                    API Mode Server
+                  </h2>
+                  <p class="text-xs text-[var(--text-muted)] mt-0.5">
+                    Connect Llama.cpp, Ollama, LM Studio, Jan or any OpenAI-compatible server.
+                  </p>
+                </div>
+
+                <!-- Quick Presets -->
+                <div class="space-y-1.5">
+                  <span class="kicker text-[10px]">Quick Presets</span>
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onclick={() => {
+                        serverHost = "http://127.0.0.1:11434/v1";
+                        serverSchema = "openai";
+                        serverModel = "qwen3.5:4b";
+                      }}
+                      class="btn-ghost !py-1 !px-2 text-[11px] font-mono cursor-pointer"
+                    >
+                      Ollama (11434)
+                    </button>
+                    <button
+                      type="button"
+                      onclick={() => {
+                        serverHost = "http://127.0.0.1:1234/v1";
+                        serverSchema = "openai";
+                        serverModel = "qwen3.5-4b";
+                      }}
+                      class="btn-ghost !py-1 !px-2 text-[11px] font-mono cursor-pointer"
+                    >
+                      LM Studio (1234)
+                    </button>
+                  </div>
+                </div>
+
+                <div class="space-y-3">
+                  <div class="space-y-1">
+                    <label
+                      for="setup-server-host"
+                      class="kicker text-[11px]"
+                    >
+                      Server Endpoint URL
+                    </label>
+                    <input
+                      id="setup-server-host"
+                      type="text"
+                      bind:value={serverHost}
+                      placeholder="http://127.0.0.1:11434/v1"
+                      class="w-full bg-[var(--bg-void)] border border-[var(--border-line)] rounded-xl p-2.5 text-xs focus:border-[var(--accent-cyan)] outline-none transition-all font-mono text-[var(--text-primary)]"
+                    />
+                  </div>
+
+                  <div class="grid grid-cols-2 gap-2.5">
+                    <div class="space-y-1">
+                      <label
+                        for="setup-server-schema"
+                        class="kicker text-[11px]"
+                      >
+                        API Schema
+                      </label>
+                      <select
+                        id="setup-server-schema"
+                        bind:value={serverSchema}
+                        class="w-full bg-[var(--bg-void)] border border-[var(--border-line)] rounded-xl p-2 text-xs outline-none cursor-pointer text-[var(--text-primary)]"
+                      >
+                        <option value="openai">OpenAI-compatible</option>
+                        <option value="lmstudio">LM Studio</option>
+                      </select>
+                    </div>
+                    <div class="space-y-1">
+                      <label
+                        for="setup-server-model"
+                        class="kicker text-[11px]"
+                      >
+                        Model Identifier
+                      </label>
+                      <input
+                        id="setup-server-model"
+                        type="text"
+                        bind:value={serverModel}
+                        placeholder="e.g. qwen3.5:4b"
+                        class="w-full bg-[var(--bg-void)] border border-[var(--border-line)] rounded-xl p-2 text-xs focus:border-[var(--accent-cyan)] outline-none transition-all text-[var(--text-primary)] font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <!-- API Key Toggle -->
+                  <div class="space-y-2 pt-1">
+                    <label class="flex items-center gap-2.5 cursor-pointer group select-none">
+                      <div class="relative flex items-center shrink-0">
+                        <input
+                          type="checkbox"
+                          bind:checked={useServerApiKey}
+                          class="peer sr-only"
+                        />
+                        <div
+                          class="h-4 w-4 rounded-[4px] border border-[var(--border-line)] bg-[var(--bg-void)] peer-checked:bg-[var(--accent-cyan)] peer-checked:border-[var(--accent-cyan)] transition-all flex items-center justify-center"
+                        >
+                          <Check
+                            size={11}
+                            class="text-[#05040b] scale-0 peer-checked:scale-100 transition-transform stroke-[3]"
+                          />
+                        </div>
+                      </div>
+                      <span class="text-xs font-medium text-[var(--text-primary)] group-hover:text-[var(--accent-cyan)] transition-colors">
+                        Require Bearer API key
+                      </span>
+                    </label>
+
+                    {#if useServerApiKey}
+                      <div class="relative">
+                        <input
+                          type={showKey ? "text" : "password"}
+                          bind:value={serverApiKey}
+                          placeholder="Bearer API key"
+                          class="w-full bg-[var(--bg-void)] border border-[var(--border-line)] rounded-xl p-2.5 pr-10 text-xs font-mono focus:border-[var(--accent-cyan)] outline-none transition-all text-[var(--text-primary)]"
+                        />
+                        <button
+                          type="button"
+                          onclick={() => (showKey = !showKey)}
+                          class="absolute inset-y-0 right-0 flex items-center pr-3 text-[var(--text-dim)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+                          aria-label={showKey ? "Hide key" : "Show key"}
+                        >
+                          {#if showKey}
+                            <EyeOff size={14} />
+                          {:else}
+                            <Eye size={14} />
+                          {/if}
+                        </button>
+                      </div>
+                    {/if}
+                  </div>
+                </div>
+
+                <!-- Navigation -->
+                <div class="flex items-center gap-2.5 pt-2 border-t border-[var(--border-faint)]">
+                  <button
+                    type="button"
+                    onclick={() => goTo("mode")}
+                    class="btn-ghost flex-1 text-xs !py-2.5 cursor-pointer"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onclick={() => goTo("ocr")}
+                    disabled={!serverHost.trim() || !serverModel.trim()}
+                    class="btn-primary flex-1 text-xs !py-2.5 font-bold cursor-pointer disabled:bg-none disabled:bg-[var(--surface-panel-alt)] disabled:border-[var(--border-line)] disabled:text-[var(--text-dim)] disabled:opacity-60 disabled:shadow-none disabled:cursor-not-allowed"
+                  >
+                    Continue
+                    <ChevronRight size={14} />
+                  </button>
+                </div>
+              </div>
+
+            <!-- ── STEP 5C: LLM DOWNLOAD (WebGPU) ── -->
+            {:else if step === "llm"}
+              <div class="space-y-4">
+                <div>
+                  <h2 class="text-base font-display font-bold text-[var(--text-primary)]">
+                    Local Language Model
+                  </h2>
+                  <p class="text-xs text-[var(--text-muted)] mt-0.5">
+                    Download on-device LLM weights for WebGPU offline translation.
+                  </p>
+                </div>
+
+                <!-- Model selection grid -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   {#each DefaultConfig.llmModels as model}
                     <button
+                      type="button"
                       onclick={() => (selectedLlmModel = model.id)}
                       disabled={llmDownloading}
-                      class="p-4 rounded-xl border-2 text-left cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed
+                      class="p-3.5 rounded-xl border text-left cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-void)]
                         {selectedLlmModel === model.id
-                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                        : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 hover:border-zinc-300 dark:hover:border-zinc-700'}"
+                        ? 'border-[var(--accent-amber)] shadow-[0_0_14px_var(--accent-amber-glow)]'
+                        : 'border-[var(--border-line)] hover:border-[var(--border-line)]/80'}"
                     >
-                      <p
-                        class="text-sm font-bold mb-0.5 {selectedLlmModel ===
-                        model.id
-                          ? 'text-blue-600 dark:text-blue-400'
-                          : 'text-zinc-800 dark:text-zinc-200'}"
-                      >
-                        {model.label}
-                      </p>
-                      <p
-                        class="text-xs text-zinc-500 dark:text-zinc-400 mb-1.5 leading-snug"
-                      >
+                      <div class="flex items-center justify-between mb-1">
+                        <p
+                          class="text-xs font-display font-bold {selectedLlmModel === model.id
+                            ? 'text-[var(--accent-amber)]'
+                            : 'text-[var(--text-primary)]'}"
+                        >
+                          {model.label}
+                        </p>
+                        <span class="badge-cyber is-amber text-[10px] !py-0.5 !px-1.5 font-mono">
+                          {model.vram} VRAM
+                        </span>
+                      </div>
+                      <p class="text-[11px] leading-snug {selectedLlmModel === model.id ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}">
                         {model.desc}
                       </p>
-                      <span
-                        class="text-[10px] font-bold tracking-wide uppercase px-1.5 py-0.5 rounded-md bg-zinc-200 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400"
-                      >
-                        {model.vram} VRAM
-                      </span>
                     </button>
                   {/each}
                 </div>
 
-                {#if llmCleaning}
-                  <div
-                    in:fly={{ y: 6, duration: 200 }}
-                    class="flex items-center gap-3 p-3.5 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-xl"
-                  >
-                    <LoaderCircle
-                      size={18}
-                      class="text-amber-500 animate-spin shrink-0"
-                    />
-                    <p
-                      class="text-sm font-medium text-amber-700 dark:text-amber-400"
-                    >
-                      Cleaning up cached model...
-                    </p>
-                  </div>
-                {:else if llmCleaned}
-                  <div
-                    in:fly={{ y: 6, duration: 200 }}
-                    class="flex items-center gap-3 p-3.5 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800 rounded-xl"
-                  >
-                    <CircleCheck
-                      size={18}
-                      class="text-emerald-500 shrink-0"
-                    />
-                    <p
-                      class="text-sm font-medium text-emerald-700 dark:text-emerald-400"
-                    >
-                      Cached model removed. You can download it again below or
-                      close this tab.
-                    </p>
-                  </div>
-                {/if}
-
-                {#if llmCleanError}
-                  <div
-                    in:fly={{ y: 4, duration: 200 }}
-                    class="flex items-start gap-2.5 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl"
-                  >
-                    <CircleAlert
-                      size={14}
-                      class="text-red-500 shrink-0 mt-0.5"
-                    />
-                    <p
-                      class="text-xs leading-snug text-red-700 dark:text-red-400"
-                    >
-                      {llmCleanError}
-                    </p>
-                  </div>
-                {/if}
-
                 {#if !llmDone}
                   <button
+                    type="button"
                     onclick={startLlmDownload}
                     disabled={llmDownloading}
-                    class="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-xl transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2 shadow-md shadow-blue-600/20"
+                    class="w-full btn-primary !py-2.5 text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
                     {#if llmDownloading}
-                      <LoaderCircle size={16} class="animate-spin" />
-                      Downloading...
+                      <LoaderCircle size={15} class="animate-spin" />
+                      Downloading Weights...
                     {:else}
-                      <Download size={16} />
-                      Download Model
+                      <Download size={15} />
+                      Download Model Weights
                     {/if}
                   </button>
 
                   {#if llmDownloading}
-                    <div in:fly={{ y: 6, duration: 200 }} class="space-y-1.5">
-                      <div class="flex items-center justify-between mb-0.5">
-                        <span class="text-xs text-zinc-500 dark:text-zinc-400"
-                          >Downloading</span
-                        >
-                        <span
-                          class="text-xs font-bold text-zinc-700 dark:text-zinc-300"
-                          >{llmProgress}%</span
-                        >
+                    <div in:fly={{ y: 6, duration: 200 }} class="space-y-1.5 p-3 rounded-xl bg-[var(--bg-void)] border border-[var(--border-line)]">
+                      <div class="flex items-center justify-between text-xs">
+                        <span class="text-[var(--text-muted)]">Downloading</span>
+                        <span class="font-mono text-[var(--accent-cyan)] font-bold">{llmProgress}%</span>
                       </div>
-                      <div
-                        class="h-2 bg-zinc-200 dark:bg-zinc-700 rounded-full overflow-hidden"
-                      >
+                      <div class="h-1.5 bg-[var(--surface-panel)] rounded-full overflow-hidden border border-[var(--border-faint)]">
                         <div
-                          class="h-full bg-blue-500 rounded-full transition-all duration-300"
+                          class="h-full bg-[var(--accent-cyan)] shadow-[0_0_8px_var(--accent-cyan-glow)] rounded-full transition-all duration-300"
                           style="width: {llmProgress}%"
                         ></div>
                       </div>
-                      <p
-                        class="text-xs text-zinc-500 dark:text-zinc-400 truncate"
-                      >
+                      <p class="text-[11px] text-[var(--text-dim)] truncate font-mono">
                         {llmProgressText}
                       </p>
                     </div>
@@ -1457,159 +1614,173 @@
                 {:else}
                   <div
                     in:fly={{ y: 6, duration: 200 }}
-                    class="flex items-center gap-3 p-3.5 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl"
+                    class="flex items-center gap-2.5 p-3 bg-[var(--bg-void)] border border-[var(--accent-emerald)]/40 rounded-xl"
                   >
-                    <CircleCheck size={18} class="text-emerald-500 shrink-0" />
-                    <p
-                      class="text-sm font-medium text-emerald-700 dark:text-emerald-400"
-                    >
-                      Model downloaded and ready.
+                    <CircleCheck size={16} class="text-[var(--accent-emerald)] shrink-0" />
+                    <p class="text-xs font-medium text-[var(--text-primary)]">
+                      Model weights downloaded and ready for offline use.
                     </p>
                   </div>
                 {/if}
 
                 {#if llmError}
                   <div
-                    in:fly={{ y: 4, duration: 200 }}
-                    class="flex items-start gap-2.5 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl"
+                    class="flex items-start gap-2 p-3 bg-[var(--bg-void)] border border-[var(--accent-rose)]/40 rounded-xl text-[var(--accent-rose)]"
                   >
-                    <CircleAlert
-                      size={14}
-                      class="text-red-500 shrink-0 mt-0.5"
-                    />
-                    <p
-                      class="text-xs leading-snug text-red-700 dark:text-red-400"
-                    >
-                      {llmError}
-                    </p>
+                    <CircleAlert size={14} class="shrink-0 mt-0.5" />
+                    <p class="text-xs leading-snug">{llmError}</p>
                   </div>
                 {/if}
 
-                <div class="flex gap-3 pt-2">
+                <!-- Navigation -->
+                <div class="flex items-center gap-2.5 pt-2 border-t border-[var(--border-faint)]">
                   <button
-                    onclick={() => (step = "mode")}
-                    class="flex-1 border border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600 text-zinc-600 dark:text-zinc-400 font-semibold py-2.5 px-4 rounded-xl transition-all text-sm cursor-pointer"
+                    type="button"
+                    onclick={() => goTo("mode")}
+                    class="btn-ghost flex-1 text-xs !py-2.5 cursor-pointer"
                   >
                     Back
                   </button>
                   <button
-                    onclick={() => (isModelOnlyMode ? finishSetup() : goTo("ocr"))}
+                    type="button"
+                    onclick={() => goTo("ocr")}
                     disabled={!llmDone}
-                    class="flex-1 bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20 disabled:opacity-50 disabled:cursor-not-allowed font-bold py-2.5 px-4 rounded-xl transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
+                    class="btn-primary flex-1 text-xs !py-2.5 font-bold cursor-pointer disabled:bg-none disabled:bg-[var(--surface-panel-alt)] disabled:border-[var(--border-line)] disabled:text-[var(--text-dim)] disabled:opacity-60 disabled:shadow-none disabled:cursor-not-allowed"
                   >
-                    {isModelOnlyMode ? "Complete Setup" : "Continue"}
+                    Continue
                     <ChevronRight size={14} />
                   </button>
                 </div>
               </div>
 
-            <!-- OCR SELECTION -->
+            <!-- ── STEP 6: OCR SELECTION ── -->
             {:else if step === "ocr"}
-              <div class="p-8 space-y-5">
+              <div class="space-y-4">
                 <div>
-                  <h2 class="text-lg font-bold">Text Recognition (OCR)</h2>
-                  <p class="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
+                  <h2 class="text-base font-display font-bold text-[var(--text-primary)]">
+                    Text Recognition (OCR)
+                  </h2>
+                  <p class="text-xs text-[var(--text-muted)] mt-0.5">
                     Select the on-device optical character recognition engine.
                   </p>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3">
+                <!-- 3 Stacked OCR Cards -->
+                <div class="space-y-2.5">
                   <button
+                    type="button"
                     onclick={() => (selectedOcrEngine = "paddle")}
-                    class="p-4 rounded-xl border-2 text-left cursor-pointer transition-all
+                    class="w-full p-3.5 rounded-xl border text-left cursor-pointer transition-all bg-[var(--bg-void)]
                       {selectedOcrEngine === 'paddle'
-                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                      : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 hover:border-zinc-300 dark:hover:border-zinc-700'}"
+                      ? 'border-[var(--accent-cyan)] shadow-[0_0_14px_var(--accent-cyan-glow)]'
+                      : 'border-[var(--border-line)] hover:border-[var(--border-line)]/80'}"
                   >
                     <div class="flex items-center justify-between mb-1">
-                      <span class="text-sm font-bold {selectedOcrEngine === 'paddle' ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-700 dark:text-zinc-300'}">
-                        PaddleOCR
-                      </span>
-                      <span class="text-[10px] font-mono text-zinc-400">~90 MB</span>
+                      <div class="flex items-center gap-2">
+                        <span class="text-xs font-display font-bold {selectedOcrEngine === 'paddle' ? 'text-[var(--accent-cyan)]' : 'text-[var(--text-primary)]'}">
+                          PaddleOCR (Recommended)
+                        </span>
+                        <span class="badge-cyber is-cyan text-[9px] !py-0.5 !px-1.5">
+                          Multilingual
+                        </span>
+                      </div>
+                      <span class="text-[10px] font-mono {selectedOcrEngine === 'paddle' ? 'text-[var(--accent-cyan)] font-semibold' : 'text-[var(--text-dim)]'}">~90 MB</span>
                     </div>
-                    <p class="text-xs text-zinc-500 dark:text-zinc-400 leading-snug">
-                      Fast multilingual engine (default). Ships Latin + Chinese/Japanese packs — other languages download on first use.
+                    <p class="text-[11px] leading-snug {selectedOcrEngine === 'paddle' ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}">
+                      Fast multilingual engine. Ships Latin + Chinese/Japanese packs (other languages download on demand).
                     </p>
                   </button>
 
                   <button
+                    type="button"
                     onclick={() => (selectedOcrEngine = "ppocrv6-manga")}
-                    class="p-4 rounded-xl border-2 text-left cursor-pointer transition-all
+                    class="w-full p-3.5 rounded-xl border text-left cursor-pointer transition-all bg-[var(--bg-void)]
                       {selectedOcrEngine === 'ppocrv6-manga'
-                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                      : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 hover:border-zinc-300 dark:hover:border-zinc-700'}"
+                      ? 'border-[var(--accent-cyan)] shadow-[0_0_14px_var(--accent-cyan-glow)]'
+                      : 'border-[var(--border-line)] hover:border-[var(--border-line)]/80'}"
                   >
                     <div class="flex items-center justify-between mb-1">
-                      <span class="text-sm font-bold {selectedOcrEngine === 'ppocrv6-manga' ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-700 dark:text-zinc-300'}">
-                        PP-OCRv6 Manga
-                      </span>
-                      <span class="text-[10px] font-mono text-zinc-400">~21 MB</span>
+                      <div class="flex items-center gap-2">
+                        <span class="text-xs font-display font-bold {selectedOcrEngine === 'ppocrv6-manga' ? 'text-[var(--accent-cyan)]' : 'text-[var(--text-primary)]'}">
+                          PP-OCRv6 Manga
+                        </span>
+                        <span class="badge-cyber text-[9px] !py-0.5 !px-1.5">
+                          Compact
+                        </span>
+                      </div>
+                      <span class="text-[10px] font-mono {selectedOcrEngine === 'ppocrv6-manga' ? 'text-[var(--accent-cyan)] font-semibold' : 'text-[var(--text-dim)]'}">~21 MB</span>
                     </div>
-                    <p class="text-xs text-zinc-500 dark:text-zinc-400 leading-snug">
-                      Japanese-only manga fine-tune — a little bit limited but smaller size.
+                    <p class="text-[11px] leading-snug {selectedOcrEngine === 'ppocrv6-manga' ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}">
+                      Japanese-only manga fine-tune with a minimal storage footprint.
                     </p>
                   </button>
 
                   <button
+                    type="button"
                     onclick={() => (selectedOcrEngine = "manga-ocr")}
-                    class="p-4 rounded-xl border-2 text-left cursor-pointer transition-all
+                    class="w-full p-3.5 rounded-xl border text-left cursor-pointer transition-all bg-[var(--bg-void)]
                       {selectedOcrEngine === 'manga-ocr'
-                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                      : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 hover:border-zinc-300 dark:hover:border-zinc-700'}"
+                      ? 'border-[var(--accent-cyan)] shadow-[0_0_14px_var(--accent-cyan-glow)]'
+                      : 'border-[var(--border-line)] hover:border-[var(--border-line)]/80'}"
                   >
                     <div class="flex items-center justify-between mb-1">
-                      <span class="text-sm font-bold {selectedOcrEngine === 'manga-ocr' ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-700 dark:text-zinc-300'}">
-                        Manga-OCR
-                      </span>
-                      <span class="text-[10px] font-mono text-zinc-400">~460 MB</span>
+                      <div class="flex items-center gap-2">
+                        <span class="text-xs font-display font-bold {selectedOcrEngine === 'manga-ocr' ? 'text-[var(--accent-cyan)]' : 'text-[var(--text-primary)]'}">
+                          Manga-OCR
+                        </span>
+                        <span class="badge-cyber text-[9px] !py-0.5 !px-1.5">
+                          High Accuracy
+                        </span>
+                      </div>
+                      <span class="text-[10px] font-mono {selectedOcrEngine === 'manga-ocr' ? 'text-[var(--accent-cyan)] font-semibold' : 'text-[var(--text-dim)]'}">~460 MB</span>
                     </div>
-                    <p class="text-xs text-zinc-500 dark:text-zinc-400 leading-snug">
-                      Flagship model for Japanese text & vertical writing.
+                    <p class="text-[11px] leading-snug {selectedOcrEngine === 'manga-ocr' ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}">
+                      Deep Transformer model for complex Japanese typography and vertical text.
                     </p>
                   </button>
                 </div>
 
                 <!-- OCR Download / Cache Status Card -->
                 <div
-                  class="flex flex-col gap-2 p-3.5 rounded-xl border transition-colors
-                    {ocrDownloaded
-                    ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20'
+                  class="flex flex-col gap-2 p-3.5 rounded-xl border transition-colors bg-[var(--bg-void)]
+                    {ocrDownloaded && gateDownloaded
+                    ? 'border-[var(--accent-emerald)]/40'
                     : ocrError
-                      ? 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'
+                      ? 'border-[var(--accent-rose)]/40'
                       : ocrDownloading
-                        ? 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20'
-                        : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50'}"
+                        ? 'border-[var(--accent-cyan)]/40'
+                        : 'border-[var(--border-line)]'}"
                 >
-                  <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-2">
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="flex items-center gap-2 min-w-0">
                       {#if ocrDownloading}
-                        <LoaderCircle size={15} class="animate-spin text-blue-500 shrink-0" />
-                        <span class="text-xs font-semibold text-blue-700 dark:text-blue-300">
-                          Downloading {ocrEngineLabel()}...
+                        <LoaderCircle size={15} class="animate-spin text-[var(--accent-cyan)] shrink-0" />
+                        <span class="text-xs font-medium text-[var(--accent-cyan)] truncate">
+                          {ocrProgressText}
                         </span>
-                      {:else if ocrDownloaded}
-                        <CircleCheck size={15} class="text-emerald-500 shrink-0" />
-                        <span class="text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                          {ocrEngineLabel()} cached and ready to use.
+                      {:else if ocrDownloaded && gateDownloaded}
+                        <CircleCheck size={15} class="text-[var(--accent-emerald)] shrink-0" />
+                        <span class="text-xs font-medium text-[var(--text-primary)] truncate">
+                          {ocrEngineLabel()} and Language Gate cached and ready.
                         </span>
                       {:else if ocrError}
-                        <CircleAlert size={15} class="text-red-500 shrink-0" />
-                        <span class="text-xs text-red-700 dark:text-red-400 flex-1">
+                        <CircleAlert size={15} class="text-[var(--accent-rose)] shrink-0" />
+                        <span class="text-xs text-[var(--accent-rose)] truncate">
                           {ocrError}
                         </span>
                       {:else}
-                        <Download size={15} class="text-zinc-500 shrink-0" />
-                        <span class="text-xs text-zinc-600 dark:text-zinc-400">
-                          Model weights not yet cached in local storage.
+                        <Download size={15} class="text-[var(--text-dim)] shrink-0" />
+                        <span class="text-xs text-[var(--text-muted)] truncate">
+                          Weights not yet downloaded.
                         </span>
                       {/if}
                     </div>
 
-                    {#if !ocrDownloaded && !ocrDownloading}
+                    {#if (!ocrDownloaded || !gateDownloaded) && !ocrDownloading}
                       <button
                         type="button"
                         onclick={startOcrDownload}
-                        class="px-2.5 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-sm transition-all cursor-pointer whitespace-nowrap shrink-0"
+                        class="btn-primary !py-1 !px-2.5 text-xs font-bold shrink-0 cursor-pointer"
                       >
                         Download &amp; Cache
                       </button>
@@ -1617,7 +1788,7 @@
                       <button
                         type="button"
                         onclick={startOcrDownload}
-                        class="px-2.5 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-sm transition-all cursor-pointer whitespace-nowrap shrink-0"
+                        class="btn-ghost !py-1 !px-2.5 text-xs shrink-0 cursor-pointer"
                       >
                         Retry
                       </button>
@@ -1625,30 +1796,46 @@
                   </div>
 
                   {#if ocrDownloading}
-                    <div class="w-full bg-blue-200/50 dark:bg-blue-950 rounded-full h-1.5 overflow-hidden">
-                      <div
-                        class="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
-                        style="width: {ocrProgress}%"
-                      ></div>
-                    </div>
-                    <div class="flex justify-between text-[10px] text-zinc-500 dark:text-zinc-400 font-mono">
-                      <span>{ocrProgressText}</span>
-                      <span>{ocrProgress}%</span>
+                    <div class="space-y-1">
+                      <div class="h-1.5 bg-[var(--surface-panel)] rounded-full overflow-hidden border border-[var(--border-faint)]">
+                        <div
+                          class="h-full bg-[var(--accent-cyan)] shadow-[0_0_8px_var(--accent-cyan-glow)] rounded-full transition-all duration-300"
+                          style="width: {ocrProgress}%"
+                        ></div>
+                      </div>
+                      <div class="flex justify-between text-[10px] text-[var(--text-dim)] font-mono">
+                        <span>{ocrProgressText}</span>
+                        <span>{ocrProgress}%</span>
+                      </div>
                     </div>
                   {/if}
+
+                  <!-- Component Status Badges -->
+                  <div class="flex items-center gap-1.5 pt-1 border-t border-[var(--border-faint)] text-[10px] flex-wrap">
+                    <span class="text-[var(--text-dim)]">Includes:</span>
+                    <span class="badge-cyber {ocrDownloaded ? 'is-emerald' : 'is-amber'} text-[9px] !py-0.2 !px-1.5">
+                      {ocrEngineLabel()}: {ocrDownloaded ? "Cached" : "Needs download"}
+                    </span>
+                    <span class="badge-cyber {gateDownloaded ? 'is-emerald' : 'is-amber'} text-[9px] !py-0.2 !px-1.5">
+                      Language Gate: {gateDownloaded ? "Cached (~3.7 MB)" : "Needs download (~3.7 MB)"}
+                    </span>
+                  </div>
                 </div>
 
-                <div class="flex gap-3 pt-2">
+                <!-- Navigation -->
+                <div class="flex items-center gap-2.5 pt-2 border-t border-[var(--border-faint)]">
                   <button
-                    onclick={() => (step = selectedMode === "api" ? "api" : "llm")}
-                    class="flex-1 border border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600 text-zinc-600 dark:text-zinc-400 font-semibold py-2.5 px-4 rounded-xl transition-all text-sm cursor-pointer"
+                    type="button"
+                    onclick={() => goTo(selectedMode === "api" ? "api" : "llm")}
+                    class="btn-ghost flex-1 text-xs !py-2.5 cursor-pointer"
                   >
                     Back
                   </button>
                   <button
+                    type="button"
                     onclick={() => goTo("inpaint")}
-                    disabled={!ocrDownloaded || ocrDownloading}
-                    class="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white shadow-md shadow-blue-600/20 font-bold py-2.5 px-4 rounded-xl transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
+                    disabled={!ocrDownloaded || !gateDownloaded || ocrDownloading}
+                    class="btn-primary flex-1 text-xs !py-2.5 font-bold cursor-pointer disabled:bg-none disabled:bg-[var(--surface-panel-alt)] disabled:border-[var(--border-line)] disabled:text-[var(--text-dim)] disabled:opacity-60 disabled:shadow-none disabled:cursor-not-allowed"
                   >
                     {#if ocrDownloading}
                       <LoaderCircle size={14} class="animate-spin" />
@@ -1661,106 +1848,110 @@
                 </div>
               </div>
 
-            <!-- INPAINTING SELECTION -->
+            <!-- ── STEP 7: INPAINTING & REDRAW ── -->
             {:else if step === "inpaint"}
-              <div class="p-8 space-y-5">
+              <div class="space-y-4">
                 <div>
-                  <h2 class="text-lg font-bold">Inpainting &amp; Redraw</h2>
-                  <p class="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-                    Configure how original text is cleaned before rendering translated text.
+                  <h2 class="text-base font-display font-bold text-[var(--text-primary)]">
+                    Inpainting &amp; Redraw
+                  </h2>
+                  <p class="text-xs text-[var(--text-muted)] mt-0.5">
+                    Configure how original text is cleared before rendering translated text.
                   </p>
                 </div>
 
-                <div class="space-y-3">
-                  <!-- Fast: model-free ladder (default) -->
+                <!-- 2 Balanced Inpainting Options -->
+                <div class="space-y-2.5">
                   <button
                     type="button"
-                    class="w-full text-left p-4 rounded-xl border-2 transition-all cursor-pointer
-                      {selectedInpaintMethod === 'fast'
-                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                      : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 hover:border-zinc-300 dark:hover:border-zinc-700'}"
                     onclick={() => (selectedInpaintMethod = 'fast')}
+                    class="w-full p-3.5 rounded-xl border text-left cursor-pointer transition-all flex items-start justify-between gap-3 bg-[var(--bg-void)]
+                      {selectedInpaintMethod === 'fast'
+                      ? 'border-[var(--accent-cyan)] shadow-[0_0_14px_var(--accent-cyan-glow)]'
+                      : 'border-[var(--border-line)] hover:border-[var(--border-line)]/80'}"
                   >
-                    <div class="flex items-center justify-between mb-1">
-                      <span class="text-sm font-bold {selectedInpaintMethod === 'fast' ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-700 dark:text-zinc-300'}">
-                        Fast (Recommended)
-                      </span>
-                      <span class="text-[10px] font-mono text-zinc-400">0 MB extra</span>
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-2 mb-1">
+                        <span class="text-xs font-display font-bold {selectedInpaintMethod === 'fast' ? 'text-[var(--accent-cyan)]' : 'text-[var(--text-primary)]'}">
+                          Fast (Recommended)
+                        </span>
+                        <span class="badge-cyber is-cyan text-[9px] !py-0.5 !px-1.5">
+                          0 MB Extra
+                        </span>
+                      </div>
+                      <p class="text-[11px] leading-snug {selectedInpaintMethod === 'fast' ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}">
+                        Model-free ladder: planar fill, bilateral denoise, and Telea. Instant, zero extra memory, perfectly cleans flat and screentone paper.
+                      </p>
                     </div>
-                    <p class="text-xs text-zinc-500 dark:text-zinc-400 leading-snug">
-                      Model-free ladder per region: planar fill, bilateral denoise, then Telea. Instant, zero extra memory, perfectly cleans flat and JPEG paper.
-                    </p>
+                    <div class="w-4 h-4 rounded-full border border-[var(--border-line)] flex items-center justify-center shrink-0 {selectedInpaintMethod === 'fast' ? 'border-[var(--accent-cyan)]' : ''}">
+                      {#if selectedInpaintMethod === 'fast'}
+                        <div class="w-2 h-2 rounded-full bg-[var(--accent-cyan)] shadow-[0_0_6px_var(--accent-cyan-glow)]"></div>
+                      {/if}
+                    </div>
                   </button>
 
-                  <!-- Quality: standalone LaMa pass with Fast fallback -->
                   <button
                     type="button"
-                    class="w-full text-left p-4 rounded-xl border-2 transition-all cursor-pointer
-                      {selectedInpaintMethod === 'quality'
-                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                      : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 hover:border-zinc-300 dark:hover:border-zinc-700'}"
                     onclick={() => (selectedInpaintMethod = 'quality')}
+                    class="w-full p-3.5 rounded-xl border text-left cursor-pointer transition-all flex items-start justify-between gap-3 bg-[var(--bg-void)]
+                      {selectedInpaintMethod === 'quality'
+                      ? 'border-[var(--accent-cyan)] shadow-[0_0_14px_var(--accent-cyan-glow)]'
+                      : 'border-[var(--border-line)] hover:border-[var(--border-line)]/80'}"
                   >
-                    <div class="flex items-center justify-between mb-1">
-                      <div class="flex items-center gap-1.5">
-                        <span class="text-sm font-bold {selectedInpaintMethod === 'quality' ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-700 dark:text-zinc-300'}">
-                          Quality
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-2 mb-1">
+                        <span class="text-xs font-display font-bold {selectedInpaintMethod === 'quality' ? 'text-[var(--accent-cyan)]' : 'text-[var(--text-primary)]'}">
+                          Quality (LaMa Redraw)
                         </span>
-                        <span class="text-[9px] font-semibold px-1.5 py-0.2 rounded bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
-                          LaMa redraw
+                        <span class="badge-cyber text-[9px] !py-0.5 !px-1.5">
+                          ~207 MB
                         </span>
                       </div>
-                      <span class="text-[10px] font-mono text-zinc-400">~207 MB</span>
+                      <p class="text-[11px] leading-snug {selectedInpaintMethod === 'quality' ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}">
+                        Finetuned neural inpainter that reconstructs halftone and complex art textures behind speech bubbles.
+                      </p>
                     </div>
-                    <p class="text-xs text-zinc-500 dark:text-zinc-400 leading-snug">
-                      Finetuned neural inpainter that reconstructs screentone, halftone, and art textures behind text. Regions LaMa declines fall back into Fast automatically.
-                    </p>
-                    {#if selectedInpaintMethod === 'quality'}
-                      <div class="mt-2.5 p-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-amber-800 dark:text-amber-300 text-xs leading-snug">
-                        <strong>Drawbacks &amp; Trade-offs:</strong>
-                        <ul class="list-disc list-inside mt-1 space-y-0.5 text-[11px]">
-                          <li>Requires downloading ~207 MB weights on first clean.</li>
-                          <li>Higher memory footprint (~500 MB RAM/VRAM).</li>
-                          <li>Slower inference (~30–60 seconds per complex region on CPU).</li>
-                        </ul>
-                      </div>
-                    {/if}
+                    <div class="w-4 h-4 rounded-full border border-[var(--border-line)] flex items-center justify-center shrink-0 {selectedInpaintMethod === 'quality' ? 'border-[var(--accent-cyan)]' : ''}">
+                      {#if selectedInpaintMethod === 'quality'}
+                        <div class="w-2 h-2 rounded-full bg-[var(--accent-cyan)] shadow-[0_0_6px_var(--accent-cyan-glow)]"></div>
+                      {/if}
+                    </div>
                   </button>
                 </div>
 
-                <!-- Inpaint / LaMa Cache & Download Status Card -->
+                <!-- Download Card / Status -->
                 {#if selectedInpaintMethod === 'quality'}
                   <div
-                    class="flex flex-col gap-2 p-3.5 rounded-xl border transition-colors
+                    class="flex flex-col gap-2 p-3.5 rounded-xl border transition-colors bg-[var(--bg-void)]
                       {lamaDownloaded
-                      ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20'
+                      ? 'border-[var(--accent-emerald)]/40'
                       : lamaError
-                        ? 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'
+                        ? 'border-[var(--accent-rose)]/40'
                         : lamaDownloading
-                          ? 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20'
-                          : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50'}"
+                          ? 'border-[var(--accent-cyan)]/40'
+                          : 'border-[var(--border-line)]'}"
                   >
-                    <div class="flex items-center justify-between">
-                      <div class="flex items-center gap-2">
+                    <div class="flex items-center justify-between gap-2">
+                      <div class="flex items-center gap-2 min-w-0">
                         {#if lamaDownloading}
-                          <LoaderCircle size={15} class="animate-spin text-blue-500 shrink-0" />
-                          <span class="text-xs font-semibold text-blue-700 dark:text-blue-300">
+                          <LoaderCircle size={15} class="animate-spin text-[var(--accent-cyan)] shrink-0" />
+                          <span class="text-xs font-medium text-[var(--accent-cyan)] truncate">
                             Downloading LaMa weights (~207 MB)...
                           </span>
                         {:else if lamaDownloaded}
-                          <CircleCheck size={15} class="text-emerald-500 shrink-0" />
-                          <span class="text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                            LaMa weights cached and ready to use.
+                          <CircleCheck size={15} class="text-[var(--accent-emerald)] shrink-0" />
+                          <span class="text-xs font-medium text-[var(--text-primary)] truncate">
+                            LaMa weights cached and ready.
                           </span>
                         {:else if lamaError}
-                          <CircleAlert size={15} class="text-red-500 shrink-0" />
-                          <span class="text-xs text-red-700 dark:text-red-400 flex-1">
+                          <CircleAlert size={15} class="text-[var(--accent-rose)] shrink-0" />
+                          <span class="text-xs text-[var(--accent-rose)] truncate">
                             {lamaError}
                           </span>
                         {:else}
-                          <Download size={15} class="text-zinc-500 shrink-0" />
-                          <span class="text-xs text-zinc-600 dark:text-zinc-400">
-                            LaMa weights (~207 MB) not yet cached in local storage.
+                          <Download size={15} class="text-[var(--text-dim)] shrink-0" />
+                          <span class="text-xs text-[var(--text-muted)] truncate">
+                            LaMa weights (~207 MB) not yet downloaded.
                           </span>
                         {/if}
                       </div>
@@ -1769,7 +1960,7 @@
                         <button
                           type="button"
                           onclick={startLamaDownload}
-                          class="px-2.5 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-sm transition-all cursor-pointer whitespace-nowrap shrink-0"
+                          class="btn-primary !py-1 !px-2.5 text-xs font-bold shrink-0 cursor-pointer"
                         >
                           Download Now
                         </button>
@@ -1777,7 +1968,7 @@
                         <button
                           type="button"
                           onclick={startLamaDownload}
-                          class="px-2.5 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-sm transition-all cursor-pointer whitespace-nowrap shrink-0"
+                          class="btn-ghost !py-1 !px-2.5 text-xs shrink-0 cursor-pointer"
                         >
                           Retry
                         </button>
@@ -1785,36 +1976,41 @@
                     </div>
 
                     {#if lamaDownloading}
-                      <div class="w-full bg-blue-200/50 dark:bg-blue-950 rounded-full h-1.5 overflow-hidden">
-                        <div
-                          class="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
-                          style="width: {lamaProgress}%"
-                        ></div>
-                      </div>
-                      <div class="flex justify-between text-[10px] text-zinc-500 dark:text-zinc-400 font-mono">
-                        <span>{lamaProgressText}</span>
-                        <span>{lamaProgress}%</span>
+                      <div class="space-y-1">
+                        <div class="h-1.5 bg-[var(--surface-panel)] rounded-full overflow-hidden border border-[var(--border-faint)]">
+                          <div
+                            class="h-full bg-[var(--accent-cyan)] shadow-[0_0_8px_var(--accent-cyan-glow)] rounded-full transition-all duration-300"
+                            style="width: {lamaProgress}%"
+                          ></div>
+                        </div>
+                        <div class="flex justify-between text-[10px] text-[var(--text-dim)] font-mono">
+                          <span>{lamaProgressText}</span>
+                          <span>{lamaProgress}%</span>
+                        </div>
                       </div>
                     {/if}
                   </div>
                 {:else}
-                  <div class="flex items-center gap-2 p-3 bg-zinc-100 dark:bg-zinc-800/60 rounded-xl text-xs text-zinc-500 dark:text-zinc-400">
-                    <Check size={14} class="text-emerald-500 shrink-0" />
-                    <span>Built-in mathematical ladder active. Zero extra model downloads required.</span>
+                  <div class="flex items-center gap-2 p-3 bg-[var(--bg-void)] border border-[var(--border-faint)] rounded-xl text-xs text-[var(--text-muted)]">
+                    <Check size={14} class="text-[var(--accent-emerald)] shrink-0" />
+                    <span>Built-in mathematical ladder active. Zero extra downloads required.</span>
                   </div>
                 {/if}
 
-                <div class="flex gap-3 pt-2">
+                <!-- Navigation -->
+                <div class="flex items-center gap-2.5 pt-2 border-t border-[var(--border-faint)]">
                   <button
-                    onclick={() => (step = "ocr")}
-                    class="flex-1 border border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600 text-zinc-600 dark:text-zinc-400 font-semibold py-2.5 px-4 rounded-xl transition-all text-sm cursor-pointer"
+                    type="button"
+                    onclick={() => goTo("ocr")}
+                    class="btn-ghost flex-1 text-xs !py-2.5 cursor-pointer"
                   >
                     Back
                   </button>
                   <button
+                    type="button"
                     onclick={finishSetup}
                     disabled={selectedInpaintMethod === 'quality' && (!lamaDownloaded || lamaDownloading)}
-                    class="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white shadow-md shadow-blue-600/20 font-bold py-2.5 px-4 rounded-xl transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
+                    class="btn-primary flex-1 text-xs !py-2.5 font-bold cursor-pointer disabled:bg-none disabled:bg-[var(--surface-panel-alt)] disabled:border-[var(--border-line)] disabled:text-[var(--text-dim)] disabled:opacity-60 disabled:shadow-none disabled:cursor-not-allowed"
                   >
                     {#if lamaDownloading}
                       <LoaderCircle size={14} class="animate-spin" />

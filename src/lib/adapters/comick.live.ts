@@ -22,4 +22,6 @@ export default {
     regex: "page=(\\d+)",
     source: "hash",
   },
+  containerSelector: "main",
+  imageSelector: "img[src*='comick'], img.chapter-img",
 } satisfies SiteRule;

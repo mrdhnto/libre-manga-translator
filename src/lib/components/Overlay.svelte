@@ -1,24 +1,14 @@
 <script lang="ts">
-  import {
-    LoaderCircle,
-    Check,
-    X,
-    Trash2,
-    Eraser,
-    Box,
-    Undo,
-    Redo,
-    ArrowUpNarrowWide,
-    ArrowDownUp,
-    TriangleAlert,
-    PenLine,
-    Download,
-    Image,
-    BoxSelect,
-  } from "lucide-svelte";
+  import { TriangleAlert } from "lucide-svelte";
   import { DefaultConfig, resolveLangGroup } from "@/lib/configs";
   import { env } from "@/lib/env";
-  import { isArtifactCached } from "@/lib/utils";
+  import { probeArtifactsCached } from "@/lib/utils";
+  import * as Registry from "@/entrypoints/content/translation-registry";
+  import {
+    OverlayToolbar,
+    TextEditModal,
+    BubbleEditor,
+  } from "@/lib/components/overlay";
 
   interface Props {
     targetImageRect: DOMRect;
@@ -74,7 +64,9 @@
     onBackToRefine,
   }: Props = $props();
 
-  let toolbarPosition = $state<"top" | "bottom">("top");
+  let toolbarPosition = $state({ x: 0, y: 12 }); // center-top initial, viewport-relative
+  let toolbarDragStart = $state<{ startX: number; startY: number; initialX: number; initialY: number } | null>(null);
+  let readingDirection = $state<"rtl" | "ltr">("rtl");
   let mode = $state<"loading" | "refining" | "results">("loading");
   let bboxes = $state<Bbox[]>([]);
   let isManuallySorted = $state(false);
@@ -95,17 +87,47 @@
   } | null>(null);
   let history = $state<Bbox[][]>([]);
   let historyIndex = $state(-1);
-  let loadingMsg = $state("Please wait while we find the text...");
+  let loadingMsg = $state("Detecting text…");
   let errorMsg = $state("");
   let errorTimer: ReturnType<typeof setTimeout>;
+
+  // Set true to restore the legacy 5s auto-dismiss of error dialogs.
+  const ERROR_AUTOCLOSE = false;
+
+  // Load reading direction from localStorage on mount
+  $effect(() => {
+    const stored = localStorage.getItem("lmt-reading-direction");
+    if (stored === "rtl" || stored === "ltr") readingDirection = stored;
+  });
+
+  // Persist reading direction to localStorage on change
+  $effect(() => {
+    localStorage.setItem("lmt-reading-direction", readingDirection);
+  });
 
   function showError(msg: string) {
     clearTimeout(errorTimer);
     errorMsg = msg;
-    errorTimer = setTimeout(() => (errorMsg = ""), 2000);
+    if (ERROR_AUTOCLOSE) {
+      errorTimer = setTimeout(() => (errorMsg = ""), 5000);
+    }
   }
 
-function applyBboxesSort() {
+  async function handleErrorDismiss() {
+    errorMsg = "";
+    const skip =
+      await storage.getItem<boolean>("sync:skip-bbox-refining");
+    if (skip ?? false) {
+      onClose();
+      return;
+    }
+    // Detection failed before any boxes existed (mode still "loading"):
+    // drop to refining so the user can draw boxes manually.
+    mode = "refining";
+    Registry.markIdle(originalSrc);
+  }
+
+function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
     if (bboxes.length === 0) return;
 
     let totalHeight = 0;
@@ -144,18 +166,23 @@ function applyBboxesSort() {
     }
     bands.push(currentBand);
 
-    // Sort inside each panel using Manga Diagonal Flow (Top-Right to Bottom-Left)
+    // Sort inside each panel using reading flow:
+    // RTL (Manga): Top-Right to Bottom-Left
+    // LTR (Western/Manhwa): Top-Left to Bottom-Right
     const result: typeof bboxes = [];
+    const weightY = 2.0;
 
     bands.forEach((band) => {
       band.sort((a, b) => {
-        // Weight Y twice as heavily as X. This handles edge cases where a bubble is further left, but significantly higher.
-        const weightY = 2.0; 
-
-        const scoreA = a.centerX - (a.centerY * weightY);
-        const scoreB = b.centerX - (b.centerY * weightY);
-
-        return scoreB - scoreA; 
+        if (direction === "ltr") {
+          const scoreA = -a.centerX - (a.centerY * weightY);
+          const scoreB = -b.centerX - (b.centerY * weightY);
+          return scoreB - scoreA;
+        } else {
+          const scoreA = a.centerX - (a.centerY * weightY);
+          const scoreB = b.centerX - (b.centerY * weightY);
+          return scoreB - scoreA;
+        }
       });
 
       result.push(...band.map(item => item.box));
@@ -195,9 +222,7 @@ function applyBboxesSort() {
     }
   }
 
-  async function handleConfirm() {
-    if (mode !== "refining") return;
-
+  async function executeTranslation() {
     mode = "loading";
     applyBboxesSort();
 
@@ -214,43 +239,40 @@ function applyBboxesSort() {
       if (engineId !== "gemini" && typeof caches !== "undefined") {
         let langGroup = "";
         let missing = false;
+        // Routed through background: Overlay runs in page content context
+        // whose CacheStorage partition is invisible to the extension
+        // partition where the wizard/popup download.
         if (engineId === "paddle") {
           const { group } = resolveLangGroup(
             srcLang ?? DefaultConfig.sourceLang,
           );
-          const [recCached, dictCached] = await Promise.all([
-            isArtifactCached(
-              DefaultConfig.ocrRepo,
-              DefaultConfig.ocrModelPath(group),
-            ),
-            isArtifactCached(
-              DefaultConfig.ocrRepo,
-              DefaultConfig.ocrDictPath(group),
-            ),
+          const [recCached, dictCached] = await probeArtifactsCached([
+            { repo: DefaultConfig.ocrRepo, path: DefaultConfig.ocrModelPath(group) },
+            { repo: DefaultConfig.ocrRepo, path: DefaultConfig.ocrDictPath(group) },
           ]);
           langGroup = group;
           missing = !recCached || !dictCached;
         } else if (engineId === "ppocrv6-manga") {
-          missing = !(await isArtifactCached(
-            env.ppocrv6MangaRepo,
-            "ppocr-rec-v6-small-manga.onnx",
-          ));
+          const [cached] = await probeArtifactsCached([
+            { repo: env.ppocrv6MangaRepo, path: "ppocr-rec-v6-small-manga.onnx" },
+          ]);
+          missing = !cached;
         } else if (engineId === "manga-ocr") {
-          const [encCached, decCached] = await Promise.all([
-            isArtifactCached(DefaultConfig.mangaOcrRepo, "encoder_model.onnx"),
-            isArtifactCached(DefaultConfig.mangaOcrRepo, "decoder_model.onnx"),
+          const [encCached, decCached] = await probeArtifactsCached([
+            { repo: DefaultConfig.mangaOcrRepo, path: "encoder_model.onnx" },
+            { repo: DefaultConfig.mangaOcrRepo, path: "decoder_model.onnx" },
           ]);
           missing = !encCached || !decCached;
         }
         if (missing) {
-          loadingMsg = langGroup === "" ? `Downloading Model…` : `Downloading Language ${langGroup}…`;
+          loadingMsg = langGroup === "" ? "Downloading model…" : `Downloading ${langGroup}…`;
         }
       }
     } catch {
       // Cache probe failed — keep the generic message.
     }
 
-    loadingMsg = "Please wait while we translate the text...";
+    loadingMsg = "Translating text…";
 
     const result = await requestTextTranslation(
       $state.snapshot(bboxes),
@@ -259,6 +281,7 @@ function applyBboxesSort() {
     if (typeof result === "object" && "error" in result) {
       mode = "refining";
       showError(result.error);
+      Registry.markIdle(originalSrc);
       return;
     }
 
@@ -272,7 +295,7 @@ function applyBboxesSort() {
     });
 
     mode = "loading";
-    loadingMsg = "Rendering...";
+    loadingMsg = "Rendering…";
     try {
       translatedUrl = await renderTranslations(
         $state.snapshot(translations),
@@ -281,9 +304,16 @@ function applyBboxesSort() {
     } catch (err) {
       mode = "refining";
       showError((err as Error).message);
+      Registry.markIdle(originalSrc);
       return;
     }
     mode = "results";
+    Registry.markDone(originalSrc);
+  }
+
+  async function handleConfirm() {
+    if (mode !== "refining") return;
+    return executeTranslation();
   }
 
   function openEditPanel() {
@@ -299,7 +329,7 @@ function applyBboxesSort() {
   async function applyEdits() {
     showEditPanel = false;
     mode = "loading";
-    loadingMsg = "Rendering...";
+    loadingMsg = "Rendering…";
     try {
       translatedUrl = await renderTranslations(
         $state.snapshot(editDrafts),
@@ -373,6 +403,7 @@ function applyBboxesSort() {
       showEditPanel = false;
       onBackToRefine?.();
       mode = "refining";
+      Registry.markIdle(originalSrc);
     }
   }
 
@@ -469,7 +500,11 @@ function applyBboxesSort() {
 
     if (!Array.isArray(rawBboxes)) {
       showError(rawBboxes?.error);
-      setTimeout(() => onClose(), 5000); // closes after error fades
+      Registry.markIdle(originalSrc);
+      // Legacy autoclose preserved behind flag (see ERROR_AUTOCLOSE above).
+      if (ERROR_AUTOCLOSE) {
+        setTimeout(() => onClose(), 5000); // closes after error fades
+      }
       return;
     }
 
@@ -497,15 +532,37 @@ function applyBboxesSort() {
       );
 
     applyBboxesSort();
-    mode = initialCache ? "results" : "refining";
-    translatedUrl = initialCache?.translatedSrc ?? "";
-    translations = initialCache?.translations ?? [];
-    sourceTexts = initialCache?.sourceTexts ?? [];
+    if (initialCache) {
+      mode = "results";
+      translatedUrl = initialCache.translatedSrc ?? "";
+      translations = initialCache.translations ?? [];
+      sourceTexts = initialCache.sourceTexts ?? [];
+      Registry.markDone(originalSrc);
+    } else {
+      const [skipRefining, autoTranslate] = await Promise.all([
+        storage.getItem<boolean>("sync:skip-bbox-refining"),
+        storage.getItem<boolean>("sync:auto-translate"),
+      ]);
+      if ((skipRefining || autoTranslate) && bboxes.length > 0) {
+        await executeTranslation();
+      } else {
+        mode = "refining";
+        Registry.markIdle(originalSrc);
+      }
+    }
   });
 
   const handleKeyDown = (e: KeyboardEvent) => {
+    // Check if the target is inside this overlay / wrapper
+    const path = (e.composedPath?.() || []) as HTMLElement[];
+    const isInsideOverlay = path.some(
+      (el) => el.id === "lmt-overlay" || el === wrapper,
+    );
+    // If user is typing in sidebar, popup, or another element on the page, don't hijack keys!
+    if (!isInsideOverlay) return;
+
     // Use composedPath() to inspect the actual target across Shadow DOM boundaries
-    const target = (e.composedPath?.()[0] || e.target) as HTMLElement | null;
+    const target = (path[0] || e.target) as HTMLElement | null;
     const isEditing =
       target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT");
 
@@ -523,12 +580,19 @@ function applyBboxesSort() {
       return;
     }
 
-    // If user hits Escape, close the edit panel first, else deselect the box
+    // Escape closes error modal first, then edit panel, then deselects box, then closes overlay
     if (e.key === "Escape") {
       e.stopPropagation();
       e.preventDefault();
-      if (showEditPanel) showEditPanel = false;
-      else activeIndex = null;
+      if (errorMsg) {
+        handleErrorDismiss();
+      } else if (showEditPanel) {
+        showEditPanel = false;
+      } else if (activeIndex !== null) {
+        activeIndex = null;
+      } else {
+        onClose();
+      }
       return;
     }
 
@@ -574,21 +638,24 @@ function applyBboxesSort() {
 
   $effect(() => {
     const handleClick = (event: MouseEvent) => {
-      const path = event.composedPath() as HTMLElement[];
+      const path = (event.composedPath?.() || []) as HTMLElement[];
+      const isInsideOverlay = path.some(
+        (el) => el.id === "lmt-overlay" || el === wrapper,
+      );
+      // NEVER intercept or cancel clicks outside this overlay
+      if (!isInsideOverlay) return;
 
-      if (
-        path.some(
-          (el) =>
-            el.classList?.contains("lmt-box") ||
-            el.classList?.contains("handle") ||
-            el.id === "lmt-overlay",
-        )
-      )
-        return;
+      const isBoxOrHandle = path.some(
+        (el) =>
+          el.classList?.contains("lmt-box") ||
+          el.classList?.contains("handle") ||
+          el.getAttribute?.("role") === "toolbar" ||
+          el.tagName === "BUTTON",
+      );
 
-      activeIndex = null;
-      event.stopPropagation();
-      event.preventDefault();
+      if (!isBoxOrHandle) {
+        activeIndex = null;
+      }
     };
 
     const handleMouseMove = (e: MouseEvent) => {
@@ -598,6 +665,17 @@ function applyBboxesSort() {
       e.preventDefault();
 
       requestAnimationFrame(() => {
+        // Toolbar drag
+        if (toolbarDragStart) {
+          const dx = e.clientX - toolbarDragStart.startX;
+          const dy = e.clientY - toolbarDragStart.startY;
+          toolbarPosition = {
+            x: toolbarDragStart.initialX + dx,
+            y: toolbarDragStart.initialY + dy,
+          };
+          return;
+        }
+
         if (!dragInfo) return;
         const { index, handle, startX, startY, initialBox } = dragInfo;
 
@@ -653,29 +731,55 @@ function applyBboxesSort() {
         }
       }
       dragInfo = null;
+      toolbarDragStart = null;
     };
 
-    if (dragInfo) {
+    if (dragInfo || toolbarDragStart) {
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("mouseup", handleMouseUp);
     }
     if (mode === "refining")
-      window.addEventListener("click", handleClick, { capture: true });
+      window.addEventListener("click", handleClick);
     window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", isolateHostKeyboard);
-    window.addEventListener("keypress", isolateHostKeyboard);
+    const handleOpenEdit = () => {
+      if (mode === "results") openEditPanel();
+    };
+    const handleToggleOriginal = () => {
+      if (mode === "results") showOriginal = !showOriginal;
+    };
+    const handleExport = () => {
+      if (mode === "results") saveJpg();
+    };
+
     wrapper.addEventListener("lmt:back-to-refine", handleBackToRefine);
+    wrapper.addEventListener("lmt:open-edit", handleOpenEdit);
+    wrapper.addEventListener("lmt:toggle-original", handleToggleOriginal);
+    wrapper.addEventListener("lmt:export-jpeg", handleExport);
 
     return () => {
       if (mode === "refining")
-        window.removeEventListener("click", handleClick, { capture: true });
+        window.removeEventListener("click", handleClick);
       window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", isolateHostKeyboard);
-      window.removeEventListener("keypress", isolateHostKeyboard);
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
-      window.removeEventListener("lmt:back-to-refine", handleBackToRefine);
+      wrapper.removeEventListener("lmt:back-to-refine", handleBackToRefine);
+      wrapper.removeEventListener("lmt:open-edit", handleOpenEdit);
+      wrapper.removeEventListener("lmt:toggle-original", handleToggleOriginal);
+      wrapper.removeEventListener("lmt:export-jpeg", handleExport);
     };
+  });
+
+  $effect(() => {
+    if (wrapper) {
+      wrapper.setAttribute("data-lmt-mode", mode);
+      wrapper.setAttribute("data-lmt-progress", loadingMsg);
+      wrapper.dispatchEvent(
+        new CustomEvent("lmt:mode-change", { detail: { mode }, bubbles: true }),
+      );
+      wrapper.dispatchEvent(
+        new CustomEvent("lmt:progress", { detail: { message: loadingMsg }, bubbles: true }),
+      );
+    }
   });
 
   const maskPath = $derived.by(() => {
@@ -706,7 +810,7 @@ function applyBboxesSort() {
     id="lmt-overlay"
     role="presentation"
     tabindex="-1"
-    class="absolute top-0 left-0 overflow-hidden pointer-events-auto group z-50 w-full h-full outline-none"
+    class="absolute top-0 left-0 overflow-hidden {mode === 'loading' ? 'pointer-events-none' : 'pointer-events-auto'} group z-50 w-full h-full outline-none"
     onmousedown={isolateHostEvents}
     onpointerdown={isolateHostEvents}
     onpointerup={isolateHostEvents}
@@ -720,206 +824,63 @@ function applyBboxesSort() {
     onkeydown={handleKeyDown}
     onkeyup={isolateHostKeyboard}
     onkeypress={isolateHostKeyboard}
-    onclickcapture={(e) => e.preventDefault()}
+    onclickcapture={(e) => {
+      if (mode !== "loading") e.preventDefault();
+    }}
     onclick={isolateHostClick}
   >
-  {#if mode === "loading"}
-    <div
-      class="absolute inset-0 bg-black/60 backdrop-blur-[1px] flex items-center justify-center z-70"
-    >
-      <div class="flex flex-col items-center gap-3">
-        <LoaderCircle size={40} class="animate-spin text-white" />
-        <p class="text-white text-sm font-medium tracking-wide animate-pulse">
-          {loadingMsg}
-        </p>
-      </div>
-    </div>
-  {/if}
-
   {#if mode === "refining"}
-    <div
-      class="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 z-60 transition-all duration-300
-    {toolbarPosition === 'top'
-        ? 'top-4 flex-col'
-        : 'bottom-4 flex-col-reverse'} 
-    {dragInfo ? 'opacity-30 pointer-events-none' : ''}"
-      onmousedown={(e) => e.stopPropagation()}
-      role="presentation"
-    >
-      <div
-        class="relative bg-white shadow-lg rounded-lg p-2 flex gap-2 border border-gray-200"
-      >
-        <button
-          onclick={(e) => {
-            e.stopPropagation();
-            if (previousImageUrl) {
-              translatedUrl = previousImageUrl;
-              previousImageUrl = "";
-              mode = "results";
-            } else onClose();
-          }}
-          class="absolute -top-2 -right-2 cursor-pointer bg-gray-200 rounded-full p-1 hover:bg-gray-300 transition-colors"
-        >
-          <X size={18} />
-        </button>
+    <OverlayToolbar
+      mode="refining"
+      hasBboxes={bboxes.length > 0}
+      hasActiveBox={activeIndex !== null}
+      canUndo={historyIndex > 0}
+      canRedo={historyIndex < history.length - 1}
+      position={toolbarPosition}
+      isDragActive={dragInfo !== null}
+      {readingDirection}
+      onDragStart={(e) => {
+        toolbarDragStart = {
+          startX: e.clientX,
+          startY: e.clientY,
+          initialX: toolbarPosition.x,
+          initialY: toolbarPosition.y,
+        };
+      }}
+      onAddBox={addBox}
+      onDeleteBox={deleteActiveBox}
+      onClearAll={clearAllBoxes}
+      onAutoSort={() => applyBboxesSort(readingDirection)}
+      onToggleReadingDirection={() => (readingDirection = readingDirection === "rtl" ? "ltr" : "rtl")}
+      onConfirm={handleConfirm}
+      onUndo={undo}
+      onRedo={redo}
+      onClose={() => {
+        if (previousImageUrl) {
+          translatedUrl = previousImageUrl;
+          previousImageUrl = "";
+          mode = "results";
+        } else onClose();
+      }}
+    />
 
-        <button
-          onclick={() =>
-            (toolbarPosition = toolbarPosition === "top" ? "bottom" : "top")}
-          class="absolute -top-2 -left-2 cursor-pointer bg-gray-200 rounded-full p-1 hover:bg-gray-300 transition-colors"
-        >
-          <ArrowDownUp size={18} />
-        </button>
-
-        <button
-          onclick={addBox}
-          class="cursor-pointer flex flex-col items-center justify-center px-3 py-1 rounded text-sm font-medium transition-colors hover:bg-gray-100 text-gray-700 border border-gray-200"
-        >
-          <Box size={18} />
-          <span>Add Box</span>
-        </button>
-
-        <button
-          onclick={deleteActiveBox}
-          class="cursor-pointer flex flex-col items-center justify-center px-3 py-1 rounded text-sm font-medium transition-colors
-      {activeIndex === null
-            ? 'hover:bg-gray-100 text-gray-700 border border-gray-200'
-            : 'border border-blue-200 bg-blue-100 text-blue-700'}"
-        >
-          <Trash2 size={18} />
-          <span>Delete Box</span>
-        </button>
-
-        <button
-          onclick={clearAllBoxes}
-          disabled={bboxes.length === 0}
-          title="Clear all OCR boxes to add your own manually"
-          class="cursor-pointer flex flex-col items-center justify-center px-3 py-1 rounded text-sm font-medium transition-colors hover:bg-red-100 text-red-700 border border-red-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-        >
-          <Eraser size={18} />
-          <span>Clear All</span>
-        </button>
-
-        <button
-          onclick={() => {
-            applyBboxesSort();
-          }}
-          class="cursor-pointer flex flex-col items-center px-3 py-1 rounded text-sm font-medium transition-colors hover:bg-purple-100 text-purple-700 border border-purple-200"
-        >
-          <ArrowUpNarrowWide size={18} />
-          <span>Auto Sort</span>
-        </button>
-
-        <button
-          onclick={handleConfirm}
-          class="cursor-pointer flex flex-col items-center px-3 py-1 rounded text-sm font-medium transition-colors hover:bg-green-100 text-green-700 border border-green-200"
-        >
-          <Check size={18} />
-          <span>Confirm</span>
-        </button>
-      </div>
-
-      <div class="flex gap-2">
-        <button
-          onclick={undo}
-          disabled={historyIndex <= 0}
-          title="Undo"
-          class="cursor-pointer p-1.5 bg-white shadow-sm rounded-md border border-gray-200 text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
-        >
-          <Undo size={16} />
-        </button>
-
-        <button
-          onclick={redo}
-          disabled={historyIndex >= history.length - 1}
-          title="Redo"
-          class="cursor-pointer p-1.5 bg-white shadow-sm rounded-md border border-gray-200 text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
-        >
-          <Redo size={16} />
-        </button>
-      </div>
-    </div>
-
-    {#if bboxes.length > 0}
-      <div
-        class="absolute inset-0 bg-black/50 pointer-events-none"
-        style="
-          clip-path: {maskPath};
-          transition: none;
-          will-change: clip-path;
-        "
-      ></div>
-    {/if}
-
-    {#each bboxes as box, i}
-      {@const isActive = activeIndex === i}
-
-      <div
-        role="presentation"
-        class="lmt-box absolute border-2 p-0 m-0 bg-transparent {isActive
-          ? 'border-blue-500 z-50 ring-2 ring-blue-300'
-          : box.gateSkip
-            ? 'border-amber-500 border-dashed z-40'
-            : 'border-red-500 z-40'}"
-        style:left="{box.x1 * scaleX}px"
-        style:top="{box.y1 * scaleY}px"
-        style:width="{(box.x2 - box.x1) * scaleX}px"
-        style:height="{(box.y2 - box.y1) * scaleY}px"
-        onmousedown={(e) => {
-          e.stopPropagation();
-          activeIndex = i;
-          handleDragStart(i, "move")(e);
-        }}
-        title={box.gateSkip
-          ? `${box.gateSkip === "not-japanese" ? "Language gate: text is not in the selected language" : "Language gate: unclear language"} - original left untouched, use "Translate anyway" to override`
-          : `Confidence: ${(box.confidence * 100).toPrecision(2)}%`}
-      >
-        <div
-          class="absolute -top-5.5 -left-0.5 {box.gateSkip
-            ? 'bg-amber-500'
-            : 'bg-red-500'} text-white font-bold text-sm px-1.5 py-0.5 min-w-6 text-center rounded-t-sm pointer-events-none"
-        >
-          {i + 1}
-        </div>
-
-        {#if isActive}
-          <button
-            type="button"
-            class="handle top-left"
-            onmousedown={handleDragStart(i, "tl")}
-            aria-label="Resize top left"
-          ></button>
-          <button
-            type="button"
-            class="handle top-right"
-            onmousedown={handleDragStart(i, "tr")}
-            aria-label="Resize top right"
-          ></button>
-          <button
-            type="button"
-            class="handle bottom-left"
-            onmousedown={handleDragStart(i, "bl")}
-            aria-label="Resize bottom left"
-          ></button>
-          <button
-            type="button"
-            class="handle bottom-right"
-            onmousedown={handleDragStart(i, "br")}
-            aria-label="Resize bottom right"
-          ></button>
-        {/if}
-      </div>
-    {/each}
+    <BubbleEditor
+      {bboxes}
+      {scaleX}
+      {scaleY}
+      {activeIndex}
+      {maskPath}
+      onSelectBox={(i) => (activeIndex = i)}
+      onDragStart={handleDragStart}
+    />
   {/if}
 
   {#if mode === "results"}
     <img
       src={showOriginal ? originalSrc : translatedUrl}
       alt={showOriginal ? "Original Img" : "Translated Img"}
-      class="w-full h-full object-contain"
+      class="w-full h-full object-contain select-none pointer-events-none"
     />
-    <!-- Language-gate holds: the original text is still there, so mark the
-         box and offer the one-click override right on the page. -->
     {#if !showOriginal}
       {#each bboxes as box, i}
         {#if box.gateSkip}
@@ -937,7 +898,7 @@ function applyBboxesSort() {
               title={box.gateSkip === "not-japanese"
                 ? "The language gate read this as a different script"
                 : "The language gate could not read this confidently"}
-              class="pointer-events-auto absolute bottom-1 left-1/2 -translate-x-1/2 bg-amber-500/95 hover:bg-amber-400 disabled:opacity-60 text-white text-xs font-semibold px-2 py-0.5 rounded shadow whitespace-nowrap cursor-pointer transition-colors"
+              class="pointer-events-auto absolute bottom-1 left-1/2 -translate-x-1/2 bg-amber-500/95 hover:bg-amber-400 disabled:opacity-60 text-black text-xs font-semibold px-2 py-0.5 rounded shadow whitespace-nowrap cursor-pointer transition-colors"
             >
               {forcingIndex === i ? "Translating..." : "Translate anyway"}
             </button>
@@ -962,183 +923,61 @@ function applyBboxesSort() {
         {/if}
       {/each}
     {/if}
-    <!-- Floating action cluster beside the image -->
-    <div
-      class="absolute right-1 top-1/2 -translate-y-1/2 flex flex-col gap-1.5 z-50"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.stopPropagation()}
-      role="presentation"
-    >
-      <button
-        onclick={handleBackToRefine}
-        title="Refine Boxes"
-        class="cursor-pointer bg-white/90 hover:bg-white shadow-sm rounded-lg p-2 border border-gray-200 text-gray-700 hover:text-amber-600 transition-colors"
-      >
-        <BoxSelect size={18} />
-      </button>
-      <button
-        onclick={openEditPanel}
-        title="Edit translations"
-        class="cursor-pointer bg-white/90 hover:bg-white shadow-sm rounded-lg p-2 border border-gray-200 text-gray-700 hover:text-blue-600 transition-colors"
-      >
-        <PenLine size={18} />
-      </button>
-      <button
-        onclick={saveJpg}
-        title="Save as JPG"
-        class="cursor-pointer bg-white/90 hover:bg-white shadow-sm rounded-lg p-2 border border-gray-200 text-gray-700 hover:text-green-600 transition-colors"
-      >
-        <Download size={18} />
-      </button>
-      <button
-        onclick={(e) => {
-          e.stopPropagation();
-          showOriginal = !showOriginal;
-        }}
-        title={showOriginal ? "Show Translated" : "Show Original"}
-        class="cursor-pointer bg-white/90 hover:bg-white shadow-sm rounded-lg p-2 border border-gray-200 text-gray-700 hover:text-purple-600 transition-colors"
-      >
-        <Image size={18} />
-      </button>
-      <button
-        onclick={(e) => {
-          e.stopPropagation();
-          onClose();
-        }}
-        title="Close"
-        class="cursor-pointer bg-white/90 hover:bg-white shadow-sm rounded-lg p-2 border border-gray-200 text-gray-700 hover:text-red-600 transition-colors"
-      >
-        <X size={18} />
-      </button>
-    </div>
+
+    <OverlayToolbar
+      mode="results"
+      {showOriginal}
+      onRefine={handleBackToRefine}
+      onEditTranslations={openEditPanel}
+      onExportJpg={saveJpg}
+      onToggleOriginal={() => (showOriginal = !showOriginal)}
+      onClose={onClose}
+    />
   {/if}
 
-  {#if showEditPanel}
-    <div
-      class="absolute inset-0 z-80 bg-black/50 flex items-center justify-center p-10"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={handleKeyDown}
-      onkeyup={isolateHostKeyboard}
-      onkeypress={isolateHostKeyboard}
-      role="presentation"
-    >
-      <div
-        class="bg-white rounded-xl shadow-xl w-full max-w-md max-h-full flex flex-col overflow-hidden"
-        onclick={(e) => e.stopPropagation()}
-        onkeydown={handleKeyDown}
-        onkeyup={isolateHostKeyboard}
-        onkeypress={isolateHostKeyboard}
-        role="presentation"
-      >
-        <div class="flex items-center justify-between px-4 py-3 border-b shrink-0">
-          <h3 class="font-semibold text-gray-800">Edit Translations</h3>
-          <button
-            onclick={() => (showEditPanel = false)}
-            class="cursor-pointer p-1 rounded hover:bg-gray-100 transition-colors"
-          >
-            <X size={16} />
-          </button>
-        </div>
-        <div class="overflow-y-auto px-4 py-3 flex flex-col gap-4 flex-1">
-          {#each bboxes as box, i}
-            {@const isLast = i === bboxes.length - 1}
-            <div>
-              <label
-                class="block text-xs font-medium text-gray-500 mb-1"
-                for="lmt-edit-{i}"
-              >
-                <span class="inline-flex items-center gap-1">
-                  <span class="bg-red-500 text-white font-bold text-xs px-1.5 py-0.5 rounded min-w-5 text-center">
-                    {i + 1}
-                  </span>
-                  <span class="text-gray-400 truncate max-w-[260px]"
-                    >{sourceTexts[i] || "N/A"}</span
-                  >
-                </span>
-              </label>
-              <textarea
-                id="lmt-edit-{i}"
-                bind:value={editDrafts[i]}
-                rows={2}
-                class="w-full border border-gray-300 rounded-md p-2 text-sm resize-y min-h-[3rem] focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              ></textarea>
-            </div>
-          {/each}
-        </div>
-        <div
-          class="flex justify-end gap-2 px-4 py-3 border-t shrink-0"
-        >
-          <button
-            onclick={() => (showEditPanel = false)}
-            class="cursor-pointer px-3 py-1.5 rounded-md text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onclick={applyEdits}
-            class="cursor-pointer px-3 py-1.5 rounded-md text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
-          >
-            Apply
-          </button>
-        </div>
-      </div>
-    </div>
-  {/if}
+  <TextEditModal
+    open={showEditPanel}
+    {bboxes}
+    {sourceTexts}
+    drafts={editDrafts}
+    onApply={(updated) => {
+      editDrafts = updated;
+      applyEdits();
+    }}
+    onClose={() => (showEditPanel = false)}
+  />
 
   {#if errorMsg}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <div
-      class="absolute inset-0 flex items-center justify-center z-70 bg-black/40 backdrop-blur-[1px]"
+      class="absolute inset-0 flex items-center justify-center z-70 bg-black/60 backdrop-blur-sm pointer-events-auto select-none cursor-pointer"
+      onclick={handleErrorDismiss}
+      role="alert"
     >
       <div
-        class="flex flex-col items-center gap-3 bg-white rounded-xl shadow-xl px-6 py-5 max-w-[80%] text-center
-                animate-[fadeSlideUp_0.3s_ease_forwards]"
+        role="presentation"
+        class="flex flex-col items-center gap-3 bg-[#121a26]/95 border border-rose-500/50 rounded-[6px] shadow-[0_8px_32px_rgba(0,0,0,0.8),0_0_16px_rgba(244,63,94,0.25)] px-6 py-5 max-w-[85%] text-center backdrop-blur-md cursor-default"
+        onclick={(e) => e.stopPropagation()}
+        onkeydown={(e) => e.stopPropagation()}
       >
-        <TriangleAlert size={32} class="text-red-500 shrink-0" />
-        <p class="text-sm font-medium text-red-600">{errorMsg}</p>
+        <TriangleAlert size={28} class="text-rose-400 shrink-0" />
+        <p class="text-xs font-mono text-rose-200 leading-relaxed max-h-40 overflow-y-auto custom-scrollbar">{errorMsg}</p>
+        <button
+          type="button"
+          onclick={handleErrorDismiss}
+          class="mt-1 px-3 py-1 rounded-[3px] bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-xs font-mono border border-rose-500/40 cursor-pointer transition-colors"
+        >
+          Dismiss
+        </button>
       </div>
     </div>
   {/if}
 </div>
 
 <style>
-  @reference "@/assets/app.css";
-
-  .handle {
-    @apply absolute w-3 h-3 bg-white border-2 border-blue-500 rounded-full z-50;
-    transform: translate(-50%, -50%);
-  }
-  .top-left {
-    top: 0;
-    left: 0;
-    cursor: nwse-resize;
-  }
-  .top-right {
-    top: 0;
-    left: 100%;
-    cursor: nesw-resize;
-  }
-  .bottom-left {
-    top: 100%;
-    left: 0;
-    cursor: nesw-resize;
-  }
-  .bottom-right {
-    top: 100%;
-    left: 100%;
-    cursor: nwse-resize;
-  }
   button {
     appearance: none;
     outline: none;
-  }
-  @keyframes fadeSlideUp {
-    from {
-      opacity: 0;
-      transform: translateY(8px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
   }
 </style>

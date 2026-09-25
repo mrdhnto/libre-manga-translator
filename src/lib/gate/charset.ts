@@ -241,6 +241,12 @@ export const LANGGROUP_BY_LABEL: Record<string, string> = {
   Arabic: "arabic",
   Thai: "thai",
   Devanagari: "hindi",
+  // Dravidian scripts — complete 11-group coverage for Auto-Detect routing
+  Tamil: "tamil",
+  Telugu: "telugu",
+  // English/Latin fallback is handled via `isTrustedLabel` + latin path; explicit label
+  // covers English-typed Latin pages routed through OSD.
+  English: "english",
 };
 
 /** Expected script classes for an explicit source language (null = no
