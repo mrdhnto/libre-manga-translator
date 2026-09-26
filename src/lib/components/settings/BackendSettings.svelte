@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { DefaultConfig } from "@/lib/configs";
+  import {
+    DefaultConfig,
+    defaultLlmModelId,
+    visibleLlmModels,
+  } from "@/lib/configs";
   import { openSetupTab, probeLlmsCached } from "@/lib/utils";
   import { onMount } from "svelte";
   import ModelSelect from "@/lib/components/ui/ModelSelect.svelte";
@@ -12,7 +16,7 @@
 
   let {
     currentMode = "webgpu",
-    llmModel = $bindable(DefaultConfig.llmModels[0].id),
+    llmModel = $bindable(defaultLlmModelId()),
     llmTemperature = $bindable(DefaultConfig.llmTemperature),
     serverHost = $bindable(DefaultConfig.serverHost),
     serverSchema = $bindable(DefaultConfig.serverSchema),
@@ -49,7 +53,7 @@
   let showDeleteConfirm = $state(false);
   let llmProbing = $state(false);
 
-  // Intersect the stored list with real WebLLM weight presence.
+  // Intersect the stored list with real local-LLM weight presence.
   // The stored list is stale-prone (written once at setup download);
   // without this the selected row shows Active even when weights are gone.
   async function refreshLlmCacheStatus() {
@@ -119,9 +123,9 @@
       <div class="min-w-0">
         <ModelSelect
           id="llm-model"
-          label="Local WebLLM Model"
+          label="Local LLM Model"
           bind:value={llmModel}
-          options={DefaultConfig.llmModels.map((m) => ({ id: m.id, label: m.label, size: m.vram, desc: m.desc }))}
+          options={visibleLlmModels().map((m) => ({ id: m.id, label: m.label, size: m.vram, desc: m.desc }))}
           cached={Object.fromEntries(cachedLlms.map((id) => [id, true]))}
           onDownload={(id) => openSetupTab(id)}
         />

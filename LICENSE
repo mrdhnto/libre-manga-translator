@@ -767,9 +767,8 @@ with semver ranges; licenses per upstream:
 
 | Purpose | Model | Upstream | License | Size |
 |---------|-------|----------|---------|------|
-| Bubble detection (default) | YOLO26-Nano / YOLO26-Small (Manga109-s + MangaDex) | [Kiuyha/Manga-Bubble-YOLO](https://huggingface.co/Kiuyha/Manga-Bubble-YOLO) / ComicTL | MIT | 2.4 / 9.5 MB |
-| Bubble detection (alt) | `comic-text-and-bubble-detector` RT-DETR-v2 | [ogkalu](https://huggingface.co/ogkalu/comic-text-and-bubble-detector) | Apache-2.0 | 11.1 MB |
-| Text boxes + segmentation | `comictextdetector.pt.onnx` | [dmMaze](https://github.com/dmMaze/comic-text-detector) via manga-image-translator | GPL-3.0 | ~95 MB |
+| Bubble detection (default) | `comic-text-and-bubble-detector` RT-DETR-v2 | [ogkalu](https://huggingface.co/ogkalu/comic-text-and-bubble-detector) | Apache-2.0 | 11.1 MB |
+| Text boxes + segmentation (alt) | `comictextdetector.pt.onnx` | [dmMaze](https://github.com/dmMaze/comic-text-detector) via manga-image-translator | GPL-3.0 | ~95 MB |
 | Script gate | `image-script-identification` OSD LSTM (`osd_lstm.onnx`) | [ogkalu](https://huggingface.co/ogkalu/image-script-identification) | Apache-2.0 | ~3.7 MB |
 | OCR (default) | PaddleOCR ONNX, per language group (`languages/<group>/rec.onnx` + `dict.txt`) | [monkt/paddleocr-onnx](https://huggingface.co/monkt/paddleocr-onnx) / PaddlePaddle | Apache-2.0 | ~90 MB shipped (Latin + Chinese/Japanese); ~15 MB per further group |
 | OCR (Japanese manga fine-tune) | PP-OCRv6 small rec manga ONNX | [fumetodev](https://huggingface.co/fumetodev/PP-OCRv6_small_rec_manga_ONNX) (base: PaddlePaddle) | Apache-2.0 | ~21 MB |
