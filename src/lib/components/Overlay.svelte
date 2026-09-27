@@ -91,6 +91,17 @@
   let errorMsg = $state("");
   let errorTimer: ReturnType<typeof setTimeout>;
 
+  // Live geometry: mount props go stale when readers re-layout on page
+  // change (the translated copy then renders smaller/offset). The content
+  // script keeps the wrapper glued to the live image and pushes fresh
+  // values via `lmt:geometry-change` on the wrapper.
+  // svelte-ignore state_referenced_locally: initial snapshot is intended.
+  let liveScaleX = $state(scaleX);
+  // svelte-ignore state_referenced_locally: initial snapshot is intended.
+  let liveScaleY = $state(scaleY);
+  // svelte-ignore state_referenced_locally: initial snapshot is intended.
+  let liveRect = $state({ width: targetImageRect.width, height: targetImageRect.height });
+
   // Set true to restore the legacy 5s auto-dismiss of error dialogs.
   const ERROR_AUTOCLOSE = false;
 
@@ -425,8 +436,8 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
   }
 
   function addBox() {
-    const natW = targetImageRect.width / (scaleX || 1);
-    const natH = targetImageRect.height / (scaleY || 1);
+    const natW = liveRect.width / (liveScaleX || 1);
+    const natH = liveRect.height / (liveScaleY || 1);
     const boxW = Math.min(200, natW * 0.4);
     const boxH = Math.min(200, natH * 0.2);
     const startX = (natW - boxW) / 2;
@@ -680,8 +691,8 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
         const { index, handle, startX, startY, initialBox } = dragInfo;
 
         // Calculate how much the mouse has moved in "natural" pixels
-        const dx = (e.clientX - startX) / scaleX;
-        const dy = (e.clientY - startY) / scaleY;
+        const dx = (e.clientX - startX) / liveScaleX;
+        const dy = (e.clientY - startY) / liveScaleY;
 
         // Handle Moving the whole box
         if (handle === "move") {
@@ -750,11 +761,37 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
     const handleExport = () => {
       if (mode === "results") saveJpg();
     };
+    const handleGeometryChange = (e: Event) => {
+      const d = (
+        e as CustomEvent<{
+          scaleX?: number;
+          scaleY?: number;
+          width?: number;
+          height?: number;
+        }>
+      ).detail;
+      if (!d) return;
+      if (Number.isFinite(d.scaleX) && (d.scaleX as number) > 0) {
+        liveScaleX = d.scaleX as number;
+      }
+      if (Number.isFinite(d.scaleY) && (d.scaleY as number) > 0) {
+        liveScaleY = d.scaleY as number;
+      }
+      if (
+        Number.isFinite(d.width) &&
+        Number.isFinite(d.height) &&
+        (d.width as number) > 0 &&
+        (d.height as number) > 0
+      ) {
+        liveRect = { width: d.width as number, height: d.height as number };
+      }
+    };
 
     wrapper.addEventListener("lmt:back-to-refine", handleBackToRefine);
     wrapper.addEventListener("lmt:open-edit", handleOpenEdit);
     wrapper.addEventListener("lmt:toggle-original", handleToggleOriginal);
     wrapper.addEventListener("lmt:export-jpeg", handleExport);
+    wrapper.addEventListener("lmt:geometry-change", handleGeometryChange);
 
     return () => {
       if (mode === "refining")
@@ -766,6 +803,7 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
       wrapper.removeEventListener("lmt:open-edit", handleOpenEdit);
       wrapper.removeEventListener("lmt:toggle-original", handleToggleOriginal);
       wrapper.removeEventListener("lmt:export-jpeg", handleExport);
+      wrapper.removeEventListener("lmt:geometry-change", handleGeometryChange);
     };
   });
 
@@ -783,10 +821,10 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
   });
 
   const maskPath = $derived.by(() => {
-    if (!bboxes.length || !targetImageRect) return "none";
+    if (!bboxes.length || liveRect.width <= 0 || liveRect.height <= 0) return "none";
 
-    const width = targetImageRect.width;
-    const height = targetImageRect.height;
+    const width = liveRect.width;
+    const height = liveRect.height;
 
     // Start with a path that covers the entire image (clockwise)
     let pathString = `M 0 0 h ${width} v ${height} h -${width} z `;
@@ -794,10 +832,10 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
     // Add each box as a sub-path (counter-clockwise or same direction with evenodd)
     const boxPaths = bboxes
       .map((box) => {
-        const x = box.x1 * scaleX;
-        const y = box.y1 * scaleY;
-        const w = (box.x2 - box.x1) * scaleX;
-        const h = (box.y2 - box.y1) * scaleY;
+        const x = box.x1 * liveScaleX;
+        const y = box.y1 * liveScaleY;
+        const w = (box.x2 - box.x1) * liveScaleX;
+        const h = (box.y2 - box.y1) * liveScaleY;
         return `M ${x} ${y} h ${w} v ${h} h -${w} z`;
       })
       .join(" ");
@@ -866,8 +904,8 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
 
     <BubbleEditor
       {bboxes}
-      {scaleX}
-      {scaleY}
+      scaleX={liveScaleX}
+      scaleY={liveScaleY}
       {activeIndex}
       {maskPath}
       onSelectBox={(i) => (activeIndex = i)}
@@ -886,10 +924,10 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
         {#if box.gateSkip}
           <div
             class="absolute border-2 border-dashed border-amber-500/90 rounded-sm pointer-events-none z-30"
-            style:left="{box.x1 * scaleX}px"
-            style:top="{box.y1 * scaleY}px"
-            style:width="{(box.x2 - box.x1) * scaleX}px"
-            style:height="{(box.y2 - box.y1) * scaleY}px"
+            style:left="{box.x1 * liveScaleX}px"
+            style:top="{box.y1 * liveScaleY}px"
+            style:width="{(box.x2 - box.x1) * liveScaleX}px"
+            style:height="{(box.y2 - box.y1) * liveScaleY}px"
           >
             <button
               type="button"
@@ -907,10 +945,10 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
         {#if box.inpaintDeclined && !box.gateSkip}
           <div
             class="absolute border-2 border-dotted border-rose-500/80 rounded-sm pointer-events-none z-30"
-            style:left="{box.x1 * scaleX}px"
-            style:top="{box.y1 * scaleY}px"
-            style:width="{(box.x2 - box.x1) * scaleX}px"
-            style:height="{(box.y2 - box.y1) * scaleY}px"
+            style:left="{box.x1 * liveScaleX}px"
+            style:top="{box.y1 * liveScaleY}px"
+            style:width="{(box.x2 - box.x1) * liveScaleX}px"
+            style:height="{(box.y2 - box.y1) * liveScaleY}px"
             title="Inpainting declined: background could not be cleaned cleanly. Original paper retained."
           >
             <div

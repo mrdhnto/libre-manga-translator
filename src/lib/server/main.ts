@@ -106,6 +106,28 @@ export async function translateWithServer(
   );
 
   const raw = await callServer(systemPrompt, userPrompt, config);
+
+  // One correction round-trip when the model drops/merges boxes (usually
+  // empty OCR boxes). The healed validator below guarantees the count, but
+  // a retry gives the model a chance to place real text first.
+  if (
+    raw &&
+    typeof raw === "object" &&
+    Array.isArray((raw as Record<string, any>).translations) &&
+    (raw as Record<string, any>).translations.length !== ocrResults.length
+  ) {
+    const received = (raw as Record<string, any>).translations.length;
+    console.warn(
+      `[server] count mismatch (received ${received}, expected ${ocrResults.length}) — requesting correction`,
+    );
+    const corrected = await callServer(
+      systemPrompt,
+      `${userPrompt}\n\nCORRECTION: Your previous response contained ${received} items but EXACTLY ${ocrResults.length} are required — one per input box, same order, empty boxes as "". Return the full corrected JSON now.`,
+      config,
+    );
+    return validateTranslationResult(corrected, ocrResults.length);
+  }
+
   return validateTranslationResult(raw, ocrResults.length);
 }
 

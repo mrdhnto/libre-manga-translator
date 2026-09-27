@@ -24,6 +24,29 @@ import "@/assets/app.css";
 const srcKey = (src: string) =>
   src.startsWith("data:") ? quickHash(src) : src;
 
+// Wait until the image has a real layout (loaded + non-zero rendered box).
+// Measuring a hidden/not-yet-loaded image freezes the wrapper at 0×0 and
+// misplaces the whole overlay on revisit.
+async function waitForLaidOutImage(
+  img: HTMLImageElement,
+  timeoutMs = 3000,
+): Promise<boolean> {
+  const ready = () =>
+    document.body.contains(img) &&
+    img.complete &&
+    img.naturalWidth > 0 &&
+    img.getBoundingClientRect().width > 0 &&
+    img.getBoundingClientRect().height > 0;
+  if (ready()) return true;
+  const start = performance.now();
+  while (performance.now() - start < timeoutMs) {
+    if (!document.body.contains(img)) return false;
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
+    if (ready()) return true;
+  }
+  return ready();
+}
+
 export default defineContentScript({
   matches: ["<all_urls>"],
   cssInjectionMode: "ui",
@@ -94,6 +117,12 @@ export default defineContentScript({
           return;
         }
       }
+
+      // Don't claim the pipeline while the image has no layout yet (hidden
+      // page, not-yet-loaded). Geometry captured now would freeze the wrapper
+      // at 0×0. Nothing is claimed yet, so a plain return is safe — the queue
+      // releases the slot and rescan retries when the page is visible.
+      if (!(await waitForLaidOutImage(imgElement))) return;
 
       // Claim the pipeline SYNCHRONOUSLY (before the first await below)
       // so queue slot accounting sees pending on the same tick the queue
@@ -166,18 +195,16 @@ export default defineContentScript({
         };
 
         const rect = imgElement.getBoundingClientRect();
-        const scaleX = rect.width / imgElement.naturalWidth;
-        const scaleY = rect.height / imgElement.naturalHeight;
+        const scaleX = rect.width / (imgElement.naturalWidth || 1);
+        const scaleY = rect.height / (imgElement.naturalHeight || 1);
 
         const wrapper = document.createElement("div");
         wrapper.style.cssText = `position:relative;display:inline-block;width:${rect.width}px;height:${rect.height}px;`;
         imgElement.insertAdjacentElement("beforebegin", wrapper);
         wrapper.appendChild(imgElement);
 
-        const { styleObserver, domObserver } = createImageObservers(
-          originalSrc,
-          wrapper,
-        );
+        const { styleObserver, domObserver, sizeObserver } =
+          createImageObservers(originalSrc, wrapper);
 
         // Yield once more before mounting the Overlay Svelte component. The
         // overlay runs several synchronous $effects on mount (cache lookup,
@@ -622,6 +649,7 @@ export default defineContentScript({
 
             styleObserver.disconnect();
             domObserver.disconnect();
+            sizeObserver.disconnect();
 
             const currentImg = wrapper.querySelector("img");
             if (currentImg) wrapper.replaceWith(currentImg);
@@ -680,6 +708,11 @@ export default defineContentScript({
                 overlay?.wrapper.getAttribute("data-lmt-progress") ??
                 "Translating…"
               );
+            },
+            isSameSource: (img: HTMLImageElement, src: string) => {
+              const key = srcKey(img.src);
+              const originalSrc = translatedSrcMap.get(key) ?? key;
+              return originalSrc === src || img.src === src;
             },
           },
         }),

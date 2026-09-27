@@ -12,6 +12,26 @@ export function buildTranslationPrompts(
     !seriesContext?.dictionary ||
     (seriesContext?.translatedCount ?? 0) % DefaultConfig.minTranslations === 0;
 
+  const count = ocrResults.length;
+
+  // Quote every box so empty OCR ("") stays visible to the model.
+  // Raw interpolation renders empties as `Box 5: ` (invisible) and small
+  // models silently merge/drop them → count mismatch downstream.
+  const boxLines = ocrResults
+    .map((rawText, index) => {
+      const text = typeof rawText === "string" ? rawText : String(rawText ?? "");
+      const quoted = JSON.stringify(text);
+      return text.trim().length === 0
+        ? `Box ${index + 1}: "" (empty — return "")`
+        : `Box ${index + 1}: ${quoted}`;
+    })
+    .join("\n");
+
+  const emptyRuleNumber = needsContext ? 4 : 3;
+  const contextRule = needsContext
+    ? `3. The "summary" and "dictionary" fields MUST remain strictly in ENGLISH to act as a system memory pivot.\n`
+    : "";
+
   const systemPrompt = `You are a professional manga translator${seriesContext?.seriesName ? ` working on "${seriesContext.seriesName}"` : ""}.
 Your task is to translate extracted manga dialogue${sourceLang !== "Auto-Detect" ? ` FROM ${sourceLang.toUpperCase()}` : ""} INTO ${targetLang.toUpperCase()}.
 Maintain the tone, emotion, and context of the scene.
@@ -21,9 +41,10 @@ ${seriesContext?.recentHistory?.length ? `\nPrevious pages for continuity:\n${se
 
 CRITICAL INSTRUCTIONS:
 1. The dialogue inside the "translations" array MUST be strictly in ${targetLang.toUpperCase()}. DO NOT transcribe the original text. You must output the translated meaning.
-${needsContext ? `2. The "summary" and "dictionary" fields MUST remain strictly in ENGLISH to act as a system memory pivot.` : ""}
+2. The "translations" array MUST contain EXACTLY ${count} items, in the same order as the input boxes (Box 1 → index 0, Box 2 → index 1, …). NEVER merge, drop, split, or add items — one output string per input box, even if some boxes look alike.
+${contextRule}${emptyRuleNumber}. If a box is empty (""), return "" at the same index. Empty input MUST stay empty output — do not delete the entry or borrow a neighbour's text.
 
-Output strictly as valid JSON matching this structure exactly:
+Output strictly as valid JSON matching this structure exactly (EXACTLY ${count} items in "translations"):
 {
   "translations": ["translation for box 1", "translation for box 2"]${
     needsContext
@@ -33,9 +54,9 @@ Output strictly as valid JSON matching this structure exactly:
 }`;
 
   const userPrompt = `--- CURRENT PAGE DIALOGUE ---
-Please translate the following extracted text boxes:
+Please translate the following ${count} extracted text boxes. Return EXACTLY ${count} strings in "translations", preserving order and empties:
 
-${ocrResults.map((text, index) => `Box ${index + 1}: ${text}`).join("\n")}
+${boxLines}
 
 ${
   needsContext
@@ -48,7 +69,12 @@ ${
   const schema = JSON.stringify({
     type: "object",
     properties: {
-      translations: { type: "array", items: { type: "string" } },
+      translations: {
+        type: "array",
+        items: { type: "string" },
+        minItems: count,
+        maxItems: count,
+      },
       ...(needsContext
         ? {
             context: {
