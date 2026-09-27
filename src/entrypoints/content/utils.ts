@@ -184,6 +184,48 @@ export async function updateSeriesContext(
   await storage.setItem(`sync:context-${seriesName}`, stored);
 }
 
+/**
+ * Resize the overlay wrapper to the live image's rendered box and notify
+ * the Overlay (frozen mount-time geometry goes stale when readers re-layout
+ * on page change — the translated copy then renders smaller/offset).
+ * Returns false when the image has no usable layout yet.
+ */
+export function syncWrapperGeometry(
+  wrapper: HTMLElement,
+  img: HTMLImageElement,
+): boolean {
+  const rect = img.getBoundingClientRect();
+  if (
+    rect.width <= 0 ||
+    rect.height <= 0 ||
+    !img.naturalWidth ||
+    !img.naturalHeight
+  ) {
+    return false;
+  }
+  const current = wrapper.getBoundingClientRect();
+  if (
+    Math.abs(current.width - rect.width) < 0.5 &&
+    Math.abs(current.height - rect.height) < 0.5
+  ) {
+    return true;
+  }
+  wrapper.style.width = `${rect.width}px`;
+  wrapper.style.height = `${rect.height}px`;
+  wrapper.dispatchEvent(
+    new CustomEvent("lmt:geometry-change", {
+      detail: {
+        scaleX: rect.width / img.naturalWidth,
+        scaleY: rect.height / img.naturalHeight,
+        width: rect.width,
+        height: rect.height,
+      },
+      bubbles: true,
+    }),
+  );
+  return true;
+}
+
 export function createImageObservers(
   originalSrc: string,
   wrapper: HTMLElement,
@@ -193,6 +235,26 @@ export function createImageObservers(
     const img = wrapper.querySelector("img");
     if (img) wrapper.style.display = img.style.display;
   });
+
+  // Keeps the fixed-px wrapper glued to the live image's rendered box.
+  // Reader re-layouts (page change, zoom, container resize) otherwise leave
+  // a stale-sized overlay showing a smaller/offset translated copy.
+  // Epsilon-guarded: setting wrapper = img rect converges, so no loop.
+  let sizeRaf = 0;
+  const sizeObserver = new ResizeObserver(() => {
+    if (sizeRaf) return;
+    sizeRaf = requestAnimationFrame(() => {
+      sizeRaf = 0;
+      const img = wrapper.querySelector("img");
+      if (img instanceof HTMLImageElement) syncWrapperGeometry(wrapper, img);
+    });
+  });
+
+  const observeLiveImg = () => {
+    sizeObserver.disconnect();
+    const img = wrapper.querySelector("img");
+    if (img instanceof HTMLImageElement) sizeObserver.observe(img);
+  };
 
   // Re-attaches wrapper when SPA website remounts a fresh img element
   const domObserver = new MutationObserver(() => {
@@ -217,6 +279,16 @@ export function createImageObservers(
     wrapper.style.display =
       freshImg.style.display || getComputedStyle(freshImg).display;
 
+    // Fresh element, possibly not laid out yet: sync now, and again on load.
+    if (!syncWrapperGeometry(wrapper, freshImg) && !freshImg.complete) {
+      freshImg.addEventListener(
+        "load",
+        () => syncWrapperGeometry(wrapper, freshImg),
+        { once: true },
+      );
+    }
+    observeLiveImg();
+
     styleObserver.disconnect();
     styleObserver.observe(freshImg, {
       attributes: true,
@@ -226,7 +298,9 @@ export function createImageObservers(
     domObserver.observe(document.body, { childList: true, subtree: true });
   });
 
-  return { styleObserver, domObserver };
+  observeLiveImg();
+
+  return { styleObserver, domObserver, sizeObserver };
 }
 
 /**

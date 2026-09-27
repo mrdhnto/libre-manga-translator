@@ -1,15 +1,18 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { Sparkles, LoaderCircle } from "lucide-svelte";
+  import { isPending as isRegistryPending } from "@/entrypoints/content/translation-registry";
 
   let {
     onTranslate,
     getOverlayMode,
     getOverlayProgress,
+    isSameSource,
   }: {
     onTranslate?: (img: HTMLImageElement) => void;
     getOverlayMode?: (img: HTMLImageElement) => "idle" | "translating" | "translated";
     getOverlayProgress?: (img: HTMLImageElement) => string;
+    isSameSource?: (img: HTMLImageElement, src: string) => boolean;
   } = $props();
 
   let x = $state(0);
@@ -18,6 +21,10 @@
   let status = $state<"idle" | "translating" | "translated">("idle");
   let progressText = $state("Detecting text…");
   let targetImg = $state<HTMLImageElement | null>(null);
+  // Pipeline-active image shown without hover (manual click optimistic or
+  // auto-queue). Hover takes over while hovering; pointer-leave snaps back.
+  let autoImg = $state<HTMLImageElement | null>(null);
+  let hoverImg = $state<HTMLImageElement | null>(null);
 
   let hideTimer: ReturnType<typeof setTimeout> | null = null;
   function cancelHide() {
@@ -37,6 +44,113 @@
     }, 250);
   }
 
+  function meetsThreshold(img: HTMLImageElement) {
+    const renderedW = img.offsetWidth || img.clientWidth;
+    const renderedH = img.offsetHeight || img.clientHeight;
+    return (
+      (renderedW >= 260 && renderedH >= 260) ||
+      (img.naturalWidth >= 260 && img.naturalHeight >= 260)
+    );
+  }
+
+  function srcMatches(img: HTMLImageElement, src: string) {
+    return isSameSource?.(img, src) ?? img.src === src;
+  }
+
+  function queryMode(img: HTMLImageElement) {
+    return getOverlayMode?.(img) ?? "idle";
+  }
+
+  // Adopt the queried overlay mode, except never downgrade an optimistic
+  // "translating" while the registry still holds the image pending — the
+  // overlay mounts ~1s after click, and re-querying that gap used to flash
+  // the pill back to Translate (then hide on pointer-out).
+  function adoptMode(img: HTMLImageElement) {
+    const q = queryMode(img);
+    if (q === "translating") {
+      status = q;
+      progressText = getOverlayProgress?.(img) ?? "Translating…";
+    } else if (status !== "translating" || !isRegistryPending(img.src)) {
+      status = q;
+    }
+    return q;
+  }
+
+  function showFor(img: HTMLImageElement, auto: boolean) {
+    cancelHide();
+    const rect = img.getBoundingClientRect();
+    targetImg = img;
+    if (auto) autoImg = img;
+    x = rect.left + 8;
+    y = rect.top + 8;
+    visible = true;
+    if (adoptMode(img) === "translated") {
+      if (auto) autoImg = null;
+      scheduleHide();
+    }
+  }
+
+  // Settle the pill after a terminal-ish signal for the current target.
+  // Keeps optimistic "translating" while the registry claim is still pending.
+  function settleTarget() {
+    if (!targetImg) return;
+    if (!document.body.contains(targetImg)) {
+      targetImg = null;
+      if (autoImg && !document.body.contains(autoImg)) autoImg = null;
+      visible = false;
+      return;
+    }
+    const wasAuto = autoImg === targetImg;
+    adoptMode(targetImg);
+    if (status === "idle") {
+      if (wasAuto) autoImg = null;
+      scheduleHide();
+    } else if (status === "translated" && wasAuto) {
+      autoImg = null;
+    }
+  }
+
+  function findImgForSrc(src: string): HTMLImageElement | null {
+    const imgs = document.querySelectorAll("img");
+    for (const img of imgs) {
+      if (
+        img instanceof HTMLImageElement &&
+        document.body.contains(img) &&
+        meetsThreshold(img) &&
+        srcMatches(img, src)
+      ) {
+        return img;
+      }
+    }
+    return null;
+  }
+
+  function isActive(img: HTMLImageElement) {
+    if (!document.body.contains(img)) return false;
+    if (queryMode(img) === "translating") return true;
+    try {
+      return isRegistryPending(img.src);
+    } catch {
+      return false;
+    }
+  }
+
+  function pinFromModeEvent(e: Event) {
+    const target = e.target;
+    if (!(target instanceof HTMLElement) || typeof target.querySelector !== "function") {
+      return null;
+    }
+    const img = target.querySelector("img");
+    if (
+      !(img instanceof HTMLImageElement) ||
+      !document.body.contains(img) ||
+      !meetsThreshold(img)
+    ) {
+      return null;
+    }
+    return img;
+  }
+
   function updatePosition() {
     if (visible && targetImg && document.body.contains(targetImg)) {
       const rect = targetImg.getBoundingClientRect();
@@ -49,47 +163,48 @@
     function handleMouseOver(e: MouseEvent) {
       const target = e.target;
       if (!(target instanceof HTMLImageElement)) return;
+      if (!document.body.contains(target)) return;
 
-      const renderedW = target.offsetWidth || target.clientWidth;
-      const renderedH = target.offsetHeight || target.clientHeight;
-      const naturalW = target.naturalWidth;
-      const naturalH = target.naturalHeight;
-
-      if (
-        (renderedW >= 260 && renderedH >= 260) ||
-        (naturalW >= 260 && naturalH >= 260)
-      ) {
-        cancelHide();
-        const rect = target.getBoundingClientRect();
-        targetImg = target;
-        x = rect.left + 8;
-        y = rect.top + 8;
-        status = getOverlayMode?.(target) ?? "idle";
-        if (status === "translating") {
-          progressText = getOverlayProgress?.(target) ?? "Translating…";
-        }
-        visible = true;
+      if (!meetsThreshold(target)) return;
+      hoverImg = target;
+      cancelHide();
+      if (targetImg !== target) {
+        showFor(target, false);
+      } else {
+        adoptMode(target);
       }
     }
 
     function handleMouseOut(e: MouseEvent) {
-      if (e.target instanceof HTMLImageElement && e.target === targetImg) {
-        scheduleHide();
+      if (!(e.target instanceof HTMLImageElement)) return;
+      if (e.target === hoverImg) hoverImg = null;
+      if (e.target !== targetImg) return;
+      // Pinned pipeline image stays visible without hover.
+      if (targetImg === autoImg) return;
+      // Snap back to the pipeline-active image instead of hiding.
+      if (autoImg && isActive(autoImg)) {
+        showFor(autoImg, true);
+        return;
       }
+      scheduleHide();
     }
 
     function handleScroll() {
       updatePosition();
     }
 
-    function handleModeChange() {
+    function handleModeChange(e: Event) {
+      const detail = (e as CustomEvent<{ mode?: string }>).detail;
       if (targetImg) {
-        const prevStatus = status;
-        status = getOverlayMode?.(targetImg) ?? "idle";
-        if (status === "translating") {
-          progressText = getOverlayProgress?.(targetImg) ?? "Translating…";
-        } else if (prevStatus === "translating" && status === "idle") {
-          scheduleHide();
+        // Foreign overlay chatter must not clobber our target: settleTarget
+        // only downgrades when the registry no longer holds it pending.
+        settleTarget();
+      }
+      if (detail?.mode === "loading") {
+        const img = pinFromModeEvent(e);
+        if (img && img !== autoImg) autoImg = img;
+        if (img && !hoverImg && (!targetImg || !isActive(targetImg))) {
+          showFor(img, true);
         }
       }
     }
@@ -104,22 +219,34 @@
     }
 
     function handleTranslationStatus(e: Event) {
-      if (!targetImg) return;
-      const detail = (e as CustomEvent<{ status?: string }>).detail;
-      if (detail?.status !== "idle" && detail?.status !== "done") return;
+      const detail = (e as CustomEvent<{ src?: string; status?: string }>).detail;
+      if (!detail?.src || !detail?.status) return;
+
+      if (detail.status === "pending") {
+        const img =
+          targetImg && srcMatches(targetImg, detail.src)
+            ? targetImg
+            : findImgForSrc(detail.src);
+        if (!img) return;
+        autoImg = img;
+        // Stay on the hovered image; pointer-leave snaps back to autoImg.
+        if (hoverImg && hoverImg !== img) return;
+        if (targetImg !== img) showFor(img, true);
+        // No overlay yet → keep generic progress, but show translating.
+        if (queryMode(img) === "translating") adoptMode(img);
+        else status = "translating";
+        return;
+      }
+
+      if (detail.status !== "idle" && detail.status !== "done") return;
       // Safety net for queue-dropped / early-return no-ops that never emit
-      // lmt:mode-change: the optimistic "translating" set on click must fall
-      // back to "idle" so the next click can retry. Re-query is safe for
-      // unrelated images — their events leave our target's mode unchanged.
-      const next = getOverlayMode?.(targetImg) ?? "idle";
-      if (next !== status) {
-        const prevStatus = status;
-        status = next;
-        if (status === "translating") {
-          progressText = getOverlayProgress?.(targetImg) ?? "Translating…";
-        } else if (prevStatus === "translating" && status === "idle") {
-          scheduleHide();
-        }
+      // lmt:mode-change: fall back to the queried mode — but only for OUR
+      // image. Unrelated images' events used to reset the optimistic
+      // "translating" set on click (the flash). The registry-pending guard
+      // inside settleTarget covers the pre-mount gap.
+      if (targetImg && srcMatches(targetImg, detail.src)) settleTarget();
+      if (autoImg && autoImg !== targetImg && srcMatches(autoImg, detail.src)) {
+        autoImg = null;
       }
     }
 
@@ -146,9 +273,10 @@
   function handleTriggerClick(e: MouseEvent) {
     e.stopPropagation();
     e.preventDefault();
-    if (status === "idle" && targetImg) {
+    if (status === "idle" && targetImg && document.body.contains(targetImg)) {
       status = "translating";
       progressText = "Detecting text…";
+      autoImg = targetImg;
       onTranslate?.(targetImg);
     }
   }

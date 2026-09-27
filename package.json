@@ -2,7 +2,7 @@
   "name": "lmt",
   "description": "Libre Manga Translator - Privacy-focused manga translation extension, you decide where your data goes.",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {

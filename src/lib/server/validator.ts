@@ -1,6 +1,10 @@
 /**
- * Strict schema validator for LLM translation responses.
- * Validates translations array, types, count matching bboxes, and optional context.
+ * Schema validator for LLM translation responses.
+ * Validates the translations array, coerces item types, and self-heals
+ * count mismatches (pad short arrays with "", truncate long ones) so a
+ * single dropped box — typically an empty OCR box the model merged away —
+ * never fails the whole page. Pass `{ strict: true }` to restore the
+ * previous throw-on-mismatch behaviour.
  */
 
 export interface ValidatedTranslation {
@@ -10,6 +14,11 @@ export interface ValidatedTranslation {
     summary: string;
     dictionary: string;
   };
+}
+
+export interface ValidateOptions {
+  /** When true, throw on count mismatch instead of padding/truncating. */
+  strict?: boolean;
 }
 
 /**
@@ -58,6 +67,7 @@ export function parseLlmJson(content: string): any {
 export function validateTranslationResult(
   raw: unknown,
   expectedCount: number,
+  options?: ValidateOptions,
 ): ValidatedTranslation {
   if (!raw || typeof raw !== "object") {
     throw new Error("API Schema Error: Response is not an object.");
@@ -69,19 +79,39 @@ export function validateTranslationResult(
     throw new Error("API Schema Error: 'translations' must be an array.");
   }
 
-  const translations: string[] = obj.translations.map((item, idx) => {
-    if (typeof item !== "string") {
-      throw new Error(
-        `API Schema Error: Translation at index ${idx} is not a string (${typeof item}).`,
-      );
+  // Coerce non-string items instead of throwing: null/undefined → "",
+  // primitives via String(), objects via JSON. Empty stays empty so the
+  // output index still mirrors the OCR box index.
+  const translations: string[] = obj.translations.map((item) => {
+    if (typeof item === "string") return item;
+    if (item === null || item === undefined) return "";
+    if (typeof item === "object") {
+      try {
+        return JSON.stringify(item);
+      } catch {
+        return "";
+      }
     }
-    return item;
+    return String(item);
   });
 
   if (translations.length !== expectedCount) {
-    throw new Error(
-      `API Schema Error: Translation count mismatch. Expected ${expectedCount} items to match bubbles, received ${translations.length}.`,
-    );
+    if (options?.strict) {
+      throw new Error(
+        `API Schema Error: Translation count mismatch. Expected ${expectedCount} items to match bubbles, received ${translations.length}.`,
+      );
+    }
+    if (translations.length < expectedCount) {
+      console.warn(
+        `[validator] padding translations: received ${translations.length}, expected ${expectedCount} — filling missing slots with ""`,
+      );
+      while (translations.length < expectedCount) translations.push("");
+    } else {
+      console.warn(
+        `[validator] truncating translations: received ${translations.length}, expected ${expectedCount} — dropping extras`,
+      );
+      translations.length = expectedCount;
+    }
   }
 
   let sourceTexts: string[] | undefined = undefined;

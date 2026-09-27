@@ -45,9 +45,31 @@ export async function translateLocal(
     model,
     temperature,
   );
-  const validated = validateTranslationResult(raw.parsed, ocrResults.length);
-  if (raw.llmPerf) (validated as TranslateResult).llmPerf = raw.llmPerf;
-  return validated as TranslateResult;
+
+  // One correction round-trip on count mismatch (usually dropped empty
+  // boxes). The healed validator guarantees the count; the retry gives the
+  // model a chance to place real text first.
+  if (
+    raw &&
+    typeof raw === "object" &&
+    Array.isArray((raw as Record<string, any>).translations) &&
+    (raw as Record<string, any>).translations.length !== ocrResults.length
+  ) {
+    const received = (raw as Record<string, any>).translations.length;
+    console.warn(
+      `[webllm] count mismatch (received ${received}, expected ${ocrResults.length}) — requesting correction`,
+    );
+    const corrected = await runLLMModel(
+      systemPrompt,
+      `${userPrompt}\n\nCORRECTION: Your previous response contained ${received} items but EXACTLY ${ocrResults.length} are required — one per input box, same order, empty boxes as "". Return the full corrected JSON now.`,
+      schema,
+      model,
+      temperature,
+    );
+    return validateTranslationResult(corrected, ocrResults.length);
+  }
+
+  return validateTranslationResult(raw, ocrResults.length);
 }
 
 export async function makeSiteRuleLocal(
