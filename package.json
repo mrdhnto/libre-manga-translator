@@ -17,6 +17,7 @@
     "check:gate": "bun scripts/gate-selfcheck.ts",
     "check:ocr-packs": "bun scripts/ocr-lang-packs-selfcheck.ts",
     "check:ocr-audit": "bun scripts/ocr-runtime-audit.ts",
+    "check:size": "bun scripts/check-bundle-size.ts .output/firefox-mv2",
     "extract-dict": "node scripts/extract-ppocrv6-dict.cjs",
     "pin:hashes": "bun scripts/pin-model-hashes.ts",
     "postinstall": "wxt prepare"
@@ -35,6 +36,7 @@
   },
   "dependencies": {
     "@mlc-ai/web-llm": "^0.2.85",
+    "@wllama/wllama": "^3.6.1",
     "lucide-svelte": "^0.563.0",
     "onnxruntime-web": "^1.30.0"
   },

@@ -141,18 +141,46 @@ export const DefaultConfig = {
       label: "Gemma3-1B",
       desc: "Small — fastest, good enough for simple dialogue.",
       vram: "~800 MB",
+      engine: "webllm",
+      browsers: ["chrome"],
     },
     {
       id: "Qwen3.5-2B-q4f16_1-MLC",
       label: "Qwen3.5-2B",
       desc: "Balanced — speed and quality for most manga.",
       vram: "~2.3 GB",
+      engine: "webllm",
+      browsers: ["chrome"],
     },
     {
       id: "Qwen3.5-4B-q4f16_1-MLC",
       label: "Qwen3.5-4B",
       desc: "Good — better reasoning for more complex manga.",
       vram: "~3.9 GB",
+      engine: "webllm",
+      browsers: ["chrome"],
+    },
+    {
+      id: "Qwen3.5-4B-IQ4_XS-GGUF",
+      label: "Qwen3.5-4B",
+      desc: "Balanced — speed and quality for most manga.",
+      vram: "~2.3 GB",
+      engine: "wllama",
+      browsers: ["firefox"],
+      repo: env.ggufModelRepo,
+      file: "Qwen3.5-4B-IQ4_XS.gguf",
+      bytes: 2477053088,
+    },
+    {
+      id: "tiny-aya-global-q4_k_m-GGUF",
+      label: "Tiny Aya Global",
+      desc: "Tiny multilingual model — focused on translating text.",
+      vram: "~2.0 GB",
+      engine: "wllama",
+      browsers: ["firefox"],
+      repo: "CohereLabs/tiny-aya-global-GGUF",
+      file: "tiny-aya-global-q4_k_m.gguf",
+      bytes: 2143977056,
     },
   ],
   availableLanguages: [
@@ -260,4 +288,57 @@ export function resolveLangGroup(sourceLang: string): ResolvedLangGroup {
 export function normalizeDetectionModel(id: string | null | undefined): string {
   if (id === "yolo26n" || id === "yolo26s") return "comic-bubble";
   return id || DefaultConfig.detectionModels[0].id;
+}
+
+export type LlmEngine = "webllm" | "wllama";
+
+export interface LlmModelDef {
+  id: string;
+  label: string;
+  desc: string;
+  vram: string;
+  engine: LlmEngine;
+  /** build targets this model is offered on ("chrome" covers all non-Firefox builds) */
+  browsers: string[];
+  /** wllama-only: HF repo + file served through the shared model cache */
+  repo?: string;
+  file?: string;
+  bytes?: number;
+}
+
+/** "firefox" for Firefox builds, "chrome" for everything else. */
+export function currentBrowser(): "firefox" | "chrome" {
+  try {
+    const envBrowser = (import.meta.env as Record<string, string | undefined>)
+      .BROWSER;
+    if (envBrowser === "firefox") return "firefox";
+  } catch {
+    // import.meta.env unavailable (e.g. self-check scripts) — fall through
+  }
+  if (
+    typeof navigator !== "undefined" &&
+    /firefox/i.test(navigator.userAgent ?? "")
+  ) {
+    return "firefox";
+  }
+  return "chrome";
+}
+
+/** LLM models offered in this build (Firefox-only swap: GGUF on Firefox, MLC elsewhere). */
+export function visibleLlmModels(): LlmModelDef[] {
+  const browser = currentBrowser();
+  const list = (DefaultConfig.llmModels as LlmModelDef[]).filter((m) =>
+    (m.browsers ?? ["chrome"]).includes(browser),
+  );
+  return list.length > 0 ? list : (DefaultConfig.llmModels as LlmModelDef[]);
+}
+
+/** Resolve a stored model id, falling back to this build's default (handles cross-engine stale ids). */
+export function llmModelDef(id?: string | null): LlmModelDef {
+  const list = visibleLlmModels();
+  return list.find((m) => m.id === id) ?? list[0];
+}
+
+export function defaultLlmModelId(): string {
+  return visibleLlmModels()[0].id;
 }

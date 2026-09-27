@@ -38,12 +38,16 @@ export async function updateDebugEntry(
     const idx = logs.findIndex((e) => e.id === id);
     if (idx < 0) return;
     const existing = logs[idx];
-    logs[idx] = {
+    const merged: DebugEntry = {
       ...existing,
       ...patch,
       timing: { ...existing.timing, ...(patch.timing ?? {}) },
       models: { ...existing.models, ...(patch.models ?? {}) },
     };
+    if (existing.llmPerf || patch.llmPerf) {
+      merged.llmPerf = { ...existing.llmPerf, ...(patch.llmPerf ?? {}) };
+    }
+    logs[idx] = merged;
     await storage.setItem(DEBUG_LOGS_KEY, logs);
   } catch (e) {
     console.error("LMT: Failed to update debug log", e);

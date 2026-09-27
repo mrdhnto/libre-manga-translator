@@ -6,7 +6,7 @@ import * as Registry from "./translation-registry";
 import { mount, unmount } from "svelte";
 import { ShadowRootContentScriptUi } from "#imports";
 import { getSiteRule } from "@/lib/adapters";
-import { DefaultConfig, normalizeDetectionModel, resolveLangGroup } from "@/lib/configs";
+import { DefaultConfig, llmModelDef, normalizeDetectionModel, resolveLangGroup } from "@/lib/configs";
 import { logDebugEntry, updateDebugEntry } from "./debug";
 import {
   createImageObservers,
@@ -407,7 +407,7 @@ export default defineContentScript({
                     return resp;
                   }
 
-                  const { translations, context, sourceTexts, gateSkip, gate } =
+                  const { translations, context, sourceTexts, gateSkip, gate, llmPerf, gpuUnavailableReason } =
                     resp;
                   const timing = {
                     total: duration,
@@ -443,6 +443,15 @@ export default defineContentScript({
                     sourceTexts,
                     translations,
                     timing,
+                    ...(curMode === "webgpu" && llmPerf
+                      ? {
+                          llmPerf,
+                          engine: llmModelDef(debugCtx.llmModel).engine,
+                        }
+                      : {}),
+                    ...(curMode === "webgpu" && gpuUnavailableReason
+                      ? { gpuUnavailableReason }
+                      : {}),
                     ocrMinConfidence: debugCtx.ocrMinConfidence,
                     detectionMinConfidence: debugCtx.detectionMinConfidence,
                     temperature: debugCtx.temperature,

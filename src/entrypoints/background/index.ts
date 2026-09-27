@@ -1,7 +1,7 @@
 import { env } from "@/lib/env";
 import { downloadArtifactHF, arrayBufferToBase64DataUrl, isArtifactCached } from "@/lib/utils";
 import { checkArtifactUpdate, forceRefreshArtifact } from "@/lib/models/updates";
-import { detectHardware, ensureOffscreen } from "./utils";
+import { detectHardware, ensureFirefoxInferencePage, ensureOffscreen, hasOffscreenApi } from "./utils";
 import { DefaultConfig, SUPPORTED_LANG_GROUPS, normalizeDetectionModel, resolveLangGroup } from "@/lib/configs";
 import { UNKNOWN_DETECTION_MODEL_MESSAGE } from "@/lib/detections/main";
 import { testServerConnection } from "@/lib/server/main";
@@ -87,8 +87,28 @@ export default defineBackground(() => {
     void getBackendCap().then(pumpBackendQueue);
   });
 
-  async function openSetupTabInBackground(modelId?: string, clean?: boolean) {
-    let targetUrl = browser.runtime.getURL("/setup.html");
+  // Route heavy inference to its dedicated context and return the result.
+  // - Chrome (MV3): the offscreen document (offscreen API).
+  // - Firefox (MV2, no offscreen API): offscreen.html in a hidden iframe
+  //   inside the persistent background page (see ensureFirefoxInferencePage).
+  //   background.js itself stays free of inference code so every emitted .js
+  //   stays under the AMO validation limit.
+  function forwardToInference(message: unknown): Promise<unknown> {
+    const forward = () => browser.runtime.sendMessage(message);
+    if (hasOffscreenApi()) {
+      return ensureOffscreen()
+        .then(forward)
+        .catch(async () => {
+          // Offscreen may be dead (e.g. CSP crash) - recreate and retry once.
+          await browser.offscreen.closeDocument().catch(() => {});
+          await ensureOffscreen();
+          return forward();
+        });
+    }
+    return ensureFirefoxInferencePage().then(forward);
+  }
+
+  async function openSetupTabInBackground(modelId?: string, clean?: boolean) {    let targetUrl = browser.runtime.getURL("/setup.html");
     if (modelId) {
       targetUrl += `?model=${modelId}`;
     }
@@ -220,7 +240,7 @@ export default defineBackground(() => {
             : 90_000;
 
       const forward = () =>
-        browser.runtime.sendMessage({
+        forwardToInference({
           ...msg,
           type: `OFFSCREEN_${msg.type}`,
         });
@@ -229,14 +249,7 @@ export default defineBackground(() => {
         const release = await acquireBackendSlot();
         try {
           return await withTimeout(
-            ensureOffscreen()
-              .then(forward)
-              .catch(async () => {
-                // Offscreen may be dead (e.g. CSP crash) - recreate and retry once.
-                await browser.offscreen.closeDocument().catch(() => {});
-                await ensureOffscreen();
-                return forward();
-              }),
+            forward(),
             timeoutMs,
             msg.type,
           );
@@ -331,8 +344,12 @@ export default defineBackground(() => {
               }
               survivors++;
 
-              let category: "Detection" | "OCR" | "Inpaint" | "Script Gate" | "Other" = "Other";
+              let category: "Detection" | "OCR" | "Inpaint" | "Script Gate" | "LLM" | "Other" = "Other";
               let name = url.split("/").pop() ?? url;
+              // Set when the cached file is a wllama GGUF: the entry is
+              // reported as an LLM (deleted via the inference context, which
+              // also unloads it) instead of a raw cache file.
+              let llmModelId: string | null = null;
 
               if (url.includes("lama-manga") || cacheName.includes("lama-manga")) {
                 category = "Inpaint";
@@ -358,16 +375,28 @@ export default defineBackground(() => {
               } else if (url.includes("osd_lstm") || url.includes("osd_labels")) {
                 category = "Script Gate";
                 name = `Script Gate (${url.split("/").pop()})`;
+              } else if (url.endsWith(".gguf")) {
+                // wllama on-device LLM (Firefox build): real blob size is
+                // already measured above; match the configured GGUF model
+                // for a friendly label.
+                const ggufDef = (DefaultConfig.llmModels as { id: string; label: string; file?: string }[]).find(
+                  (m) => m.file && url.endsWith(`/${m.file}`),
+                );
+                category = "LLM";
+                name = ggufDef
+                  ? `${ggufDef.label} (${ggufDef.file})`
+                  : `LLM (${url.split("/").pop()})`;
+                llmModelId = ggufDef?.id ?? null;
               }
 
               results.push({
-                id: `${cacheName}::${url}`,
+                id: llmModelId ? `llm::${llmModelId}` : `${cacheName}::${url}`,
                 name,
                 category,
                 size,
                 cacheName,
-                url,
-                isLlm: false,
+                url: llmModelId ?? url,
+                isLlm: llmModelId !== null,
               });
             }
 
@@ -389,12 +418,15 @@ export default defineBackground(() => {
           const items = await storage.getItems(["local:cached-llms"]);
           const cachedLlms = (items[0]?.value as string[]) || [];
           for (const modelId of cachedLlms) {
-            const foundDef = DefaultConfig.llmModels.find((m) => m.id === modelId);
+            const foundDef = (DefaultConfig.llmModels as { id: string; label: string; vram?: string; engine?: string; bytes?: number }[]).find((m) => m.id === modelId);
+            // wllama GGUF models are enumerated from their CacheStorage
+            // entry above (real blob size) — skip here to avoid duplicates.
+            if (foundDef?.engine === "wllama") continue;
             results.push({
               id: `llm::${modelId}`,
               name: foundDef ? `${foundDef.label} (${modelId})` : modelId,
               category: "LLM",
-              size: parseVramToBytes(foundDef?.vram),
+              size: foundDef?.bytes ?? parseVramToBytes(foundDef?.vram),
               cacheName: "webllm",
               url: modelId,
               isLlm: true,
@@ -487,8 +519,7 @@ export default defineBackground(() => {
       const task = async () => {
         const { isLlm, modelId, cacheName, url } = msg.data;
         if (isLlm && modelId) {
-          await ensureOffscreen();
-          await browser.runtime.sendMessage({
+          await forwardToInference({
             type: "OFFSCREEN_DELETE_LLM_CACHE",
             data: { modelId },
           });
@@ -529,7 +560,11 @@ export default defineBackground(() => {
         const items = await storage.getItems(["local:cached-llms"]);
         const cachedLlms = (items[0]?.value as string[]) || [];
         if (cachedLlms.length > 0) {
-          await ensureOffscreen().catch(() => {});
+          if (hasOffscreenApi()) {
+            await ensureOffscreen().catch(() => {});
+          } else {
+            await ensureFirefoxInferencePage().catch(() => {});
+          }
           for (const modelId of cachedLlms) {
             await browser.runtime.sendMessage({
               type: "OFFSCREEN_DELETE_LLM_CACHE",
@@ -548,20 +583,10 @@ export default defineBackground(() => {
 
     // Delete a cached WebLLM model to free disk space
     if (msg.type === "DELETE_LLM_CACHE") {
-      const forward = () =>
-        browser.runtime.sendMessage({
-          type: "OFFSCREEN_DELETE_LLM_CACHE",
-          data: { modelId: msg.data?.modelId },
-        });
-
-      const task = ensureOffscreen()
-        .then(forward)
-        .catch(async () => {
-          // Offscreen may be dead (e.g. CSP crash) - recreate and retry once.
-          await browser.offscreen.closeDocument().catch(() => {});
-          await ensureOffscreen();
-          return forward();
-        })
+      const task = forwardToInference({
+        type: "OFFSCREEN_DELETE_LLM_CACHE",
+        data: { modelId: msg.data?.modelId },
+      })
         .then(async (res: any) => {
           if (res?.error) throw new Error(res.error);
           const items = await storage.getItems(["local:cached-llms"]);
@@ -608,8 +633,7 @@ export default defineBackground(() => {
         else prefetch = { type: "ocr", data: modelId === "manga-ocr" || modelId === "ppocrv6-manga" ? modelId : modelId };
         // Delegate to offscreen when possible, else direct download
         try {
-          await ensureOffscreen();
-          const res = await browser.runtime.sendMessage({ type: "OFFSCREEN_PREFETCH_MODEL", data: prefetch });
+          const res = await forwardToInference({ type: "OFFSCREEN_PREFETCH_MODEL", data: prefetch }) as any;
           if (res?.error) throw new Error(res.error);
         } catch {
           // Fallback: direct background download (CacheStorage accessible here)
@@ -658,8 +682,7 @@ export default defineBackground(() => {
       keepAliveWhile(
         (async () => {
           try {
-            await ensureOffscreen().catch(() => {});
-            await browser.runtime.sendMessage({ type: "OFFSCREEN_GPU_STATE_CHANGED", data: msg.data }).catch(() => {});
+            await forwardToInference({ type: "OFFSCREEN_GPU_STATE_CHANGED", data: msg.data }).catch(() => {});
           } catch {}
           return { success: true };
         })().then(respond).catch(respondErr),
@@ -670,8 +693,7 @@ export default defineBackground(() => {
     if (msg.type === "CHECK_WEBGPU_SUPPORT") {
       const task = (async () => {
         try {
-          await ensureOffscreen();
-          const res = await browser.runtime.sendMessage({ type: "OFFSCREEN_CHECK_WEBGPU_SUPPORT", data: msg.data });
+          const res = await forwardToInference({ type: "OFFSCREEN_CHECK_WEBGPU_SUPPORT", data: msg.data }) as any;
           if (res && typeof res.supported === "boolean") return res;
         } catch {}
         // Fallback: no GPU in service worker context
@@ -686,8 +708,7 @@ export default defineBackground(() => {
         const ids: string[] = Array.isArray(msg.data?.modelIds) ? msg.data.modelIds : [];
         // Best-effort: ask offscreen; fallback to local cache probes
         try {
-          await ensureOffscreen();
-          const res = await browser.runtime.sendMessage({ type: "OFFSCREEN_GET_MODEL_STATUSES", data: { modelIds: ids } });
+          const res = await forwardToInference({ type: "OFFSCREEN_GET_MODEL_STATUSES", data: { modelIds: ids } }) as any;
           if (res?.statuses) return { success: true, statuses: res.statuses, downloads: res.downloads ?? {} };
         } catch {}
         return { success: true, statuses: {}, downloads: {} };
@@ -703,8 +724,7 @@ export default defineBackground(() => {
       const task = (async () => {
         const ids: string[] = Array.isArray(msg.data?.modelIds) ? msg.data.modelIds : [];
         try {
-          await ensureOffscreen();
-          const res = await browser.runtime.sendMessage({ type: "OFFSCREEN_LLM_CACHE_STATUS", data: { modelIds: ids } });
+          const res = await forwardToInference({ type: "OFFSCREEN_LLM_CACHE_STATUS", data: { modelIds: ids } }) as any;
           if (res?.statuses) return { success: true, statuses: res.statuses };
           if (res?.error) throw new Error(res.error);
         } catch (err) {
@@ -721,8 +741,7 @@ export default defineBackground(() => {
     if (msg.type === "GET_ACTIVE_DOWNLOADS") {
       const task = (async () => {
         try {
-          await ensureOffscreen();
-          const res = await browser.runtime.sendMessage({ type: "OFFSCREEN_GET_ACTIVE_DOWNLOADS" });
+          const res = await forwardToInference({ type: "OFFSCREEN_GET_ACTIVE_DOWNLOADS" }) as any;
           if (res?.downloads) return { success: true, downloads: res.downloads };
         } catch {}
         return { success: true, downloads: {} };

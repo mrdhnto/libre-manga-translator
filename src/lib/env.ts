@@ -29,6 +29,10 @@ export const env = {
   gateModelRepo:
     import.meta.env.WXT_GATE_MODEL_REPO || "ogkalu/image-script-identification",
 
+  // Local LLM (wllama GGUF backend, Firefox build)
+  ggufModelRepo:
+    import.meta.env.WXT_GGUF_MODEL_REPO || "unsloth/Qwen3.5-4B-GGUF",
+
   privacyUrl:
     import.meta.env.WXT_PRIVACY_URL ||
     "https://raw.githubusercontent.com/mrdhnto/libre-manga-translator/refs/heads/main/privacy.md",
