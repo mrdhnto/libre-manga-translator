@@ -22,12 +22,14 @@ import { isTrustedLabel } from "../gate/charset";
 import type { OCRResult, OcrEngine, OcrOutcome } from "./types";
 import { PaddleOcrEngine } from "./paddle";
 import { MangaOcrEngine } from "./manga-ocr";
+import { PororoOcrEngine } from "./pororo";
 import { env } from "../env";
 
 export type { OCRResult, OcrOutcome };
 
 const paddleEngine = new PaddleOcrEngine();
 const mangaOcrEngine = new MangaOcrEngine();
+const pororoEngine = new PororoOcrEngine();
 // PP-OCRv6 small rec, manga fine-tune (Japanese-only): same CTC contract as
 // PaddleOCR (48px height, stock ppocrv6 dict + space + blank), fixed file +
 // bundled dict, so it reuses the Paddle runner.
@@ -42,6 +44,7 @@ const ppocrv6MangaEngine = new PaddleOcrEngine({
 export function getOcrEngine(id = DefaultConfig.ocrEngine): OcrEngine {
   if (id === "manga-ocr") return mangaOcrEngine;
   if (id === "ppocrv6-manga") return ppocrv6MangaEngine;
+  if (id === "pororo") return pororoEngine;
   return paddleEngine;
 }
 
@@ -73,7 +76,7 @@ export async function textRecognise(
 
   // Crop + slice once; the gate and the recognizer read the same lines.
   const regionLines: ImageData[][] = bboxes.map((bbox) => {
-    const rawCrop = cropBubbleFromImage(bitmap, bbox, sourceLang);
+    const rawCrop = cropBubbleFromImage(bitmap, bbox, sourceLang, engineId);
     const normalizedCrop = normalizePolarity(rawCrop);
     const boostedCrop = boostContrast(normalizedCrop);
     const bubbleH = bbox.y2 - bbox.y1;

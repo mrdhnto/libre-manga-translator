@@ -59,6 +59,7 @@ export function isModelWebGpuCapable(pathOrUrl: string): boolean {
   if (pathOrUrl.includes("detector-v4-s_int8.onnx")) return false;
   if (pathOrUrl.includes("chinese/rec.onnx") || pathOrUrl.includes("languages/chinese/rec.onnx")) return false;
   if (pathOrUrl.includes("lama-manga")) return false;
+  if (pathOrUrl.includes("brainocr.onnx")) return false;
   return true;
 }
 

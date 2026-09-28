@@ -20,6 +20,8 @@ export const env = {
   ppocrv6MangaRepo:
     import.meta.env.WXT_PPOCRV6_MANGA_REPO ||
     "fumetodev/PP-OCRv6_small_rec_manga_ONNX",
+  pororoModelRepo:
+    import.meta.env.WXT_PORORO_MODEL_REPO || "ogkalu/pororo",
 
   // Inpaint models (dynamic-axes LaMa for WebGPU trial)
   lamaInpaintModelRepo:

@@ -154,6 +154,7 @@ In-tree runtime: line preprocessing, polarity normalization, CTC decoding, and d
 | PaddleOCR (default) | `~90 MB` (Latin + Chinese/Japanese packs ship at setup) | Fast multilingual generalist. Per-language-group `rec.onnx` + `dict.txt` under `languages/<group>/`, resolved per page by `resolveLangGroup()` (`src/lib/configs.ts`) or the script gate's page majority under Auto-Detect; 9 more packs download on first use. |
 | PP-OCRv6 Manga | `~21 MB` | Japanese-only manga fine-tune ([fumetodev/PP-OCRv6_small_rec_manga_ONNX](https://huggingface.co/fumetodev/PP-OCRv6_small_rec_manga_ONNX)) — a little bit limited but smaller size. Same CTC contract as PaddleOCR (48px height, stock ppocrv6 dict + space + blank), fixed file + bundled `public/dicts/ppocrv6_dict.txt` (refresh via `bun run extract-dict`). Limits (per model card): Japanese only; furigana is not suppressed — drop ruby lines before recognition; rare kanji outside the manga distribution and the ♥ glyph are the most common residual errors. |
 | Manga-OCR | `~460 MB` | Flagship model for Japanese text & vertical writing (ViT encoder + BERT decoder, 6144 vocab). Handles vertical text and stylized lettering that PaddleOCR drops or misreads. One-time large download. |
+| Pororo OCR | `~74 MB` | Korean specialist engine ([ogkalu/pororo](https://huggingface.co/ogkalu/pororo)) utilizing Kakao Brain's TPS-VGG-BiLSTM-CTC architecture with 2,589 class vocabulary (`ocr-opt.txt`). Preprocessing resizes lines to 64px height up to 640px width with edge pixel replication padding, running in WASM CPU. |
 
 Related settings:
 
@@ -337,6 +338,7 @@ the `LICENSE` appendix.
 | OCR (default) | PaddleOCR ONNX, per language group ([Hugging Face](https://huggingface.co/monkt/paddleocr-onnx)) | PaddlePaddle | Apache-2.0 | ~90 MB shipped (Latin + Chinese/Japanese); ~15 MB / further group |
 | OCR (Japanese manga fine-tune) | PP-OCRv6 small rec manga ONNX by fumetodev ([Hugging Face](https://huggingface.co/fumetodev/PP-OCRv6_small_rec_manga_ONNX)) | fumetodev (base: PaddlePaddle) | Apache-2.0 | ~21 MB |
 | OCR (Japanese specialist) | Manga-OCR ONNX by mayocream / kha-white ([Hugging Face](https://huggingface.co/mayocream/manga-ocr-onnx)) | mayocream / kha-white | Apache-2.0 | ~460 MB |
+| OCR (Korean specialist) | Pororo OCR BrainOCR ONNX by Kakao Brain / ogkalu ([Hugging Face](https://huggingface.co/ogkalu/pororo)) | Kakao Brain / ogkalu | Apache-2.0 | ~74 MB |
 | Inpaint redraw (Quality mode, opt-in) | `lama-manga-dynamic.onnx` by ogkalu / dreMaz / advimman ([Hugging Face](https://huggingface.co/ogkalu/lama-manga-onnx-dynamic)) | ogkalu / dreMaz | MIT | ~207 MB |
 | Local translation | WebLLM (MLC-AI) with Gemma3-1B / Qwen3.5-2B / Qwen3.5-4B | MLC-AI | Apache-2.0 | 0.8–4 GB |
 

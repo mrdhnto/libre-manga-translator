@@ -201,12 +201,12 @@
                 </span>
               </div>
               <div class="text-[10px] font-mono text-[var(--text-muted)] mt-0.5">
-                <span class="text-[9px] font-semibold px-1.5 py-0.2 rounded {categoryBadgeClasses[item.category] ?? categoryBadgeClasses.Other}">
+                <span class="text-[9px] font-semibold px-1.5 py-0.5 rounded {categoryBadgeClasses[item.category] ?? categoryBadgeClasses.Other}">
                   {item.category}
                 </span>
                 {#if getLangBadge(item)}
                   <span
-                    class="text-[9px] font-semibold px-1.5 py-0.2 rounded bg-[var(--accent-cyan-soft)] text-[var(--accent-cyan)] border border-[var(--accent-cyan)]/30"
+                    class="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[var(--accent-cyan-soft)] text-[var(--accent-cyan)] border border-[var(--accent-cyan)]/30"
                     title="PaddleOCR language group"
                   >
                     {getLangBadge(item)}

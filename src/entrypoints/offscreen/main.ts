@@ -255,6 +255,11 @@ browser.runtime.onMessage.addListener((msg, _, sendResponse) => {
           ]);
         } else if (data === "ppocrv6-manga") {
           await downloadArtifactHF(env.ppocrv6MangaRepo, "ppocr-rec-v6-small-manga.onnx", true);
+        } else if (data === "pororo") {
+          await Promise.all([
+            downloadArtifactHF(env.pororoModelRepo, "brainocr.onnx", true),
+            downloadArtifactHF(env.pororoModelRepo, "ocr-opt.txt", true),
+          ]);
         } else {
           const raw = data && data !== "paddle" ? String(data) : "";
           const lang = !raw ? "chinese" : (SUPPORTED_LANG_GROUPS as readonly string[]).includes(raw) ? raw : resolveLangGroup(raw).group;

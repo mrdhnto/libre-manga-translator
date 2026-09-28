@@ -36,7 +36,7 @@
         style:width="{(box.x2 - box.x1) * scaleX}px"
         style:height="{(box.y2 - box.y1) * scaleY}px"
       >
-        <div class="absolute -top-4 -left-0.5 bg-amber-500 text-black font-mono font-bold text-[9px] px-1 py-0.2 rounded-xs">
+        <div class="absolute -top-4 -left-0.5 bg-amber-500 text-black font-mono font-bold text-[9px] px-1 py-0.5 rounded-xs">
           Declined
         </div>
       </div>

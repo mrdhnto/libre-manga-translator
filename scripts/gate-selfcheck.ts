@@ -147,6 +147,7 @@ check(
 // --- decideSkip matrix --------------------------------------------------------
 const JA = "こんにちは世界"; // real CJK text
 const EN = "Hello there world";
+const KO = "안녕하세요 세계";
 check("skip: off mode never skips", decideSkip("off", null, EN, "Japanese", null) === null);
 check("skip: empty text defers to OCR-failure path", decideSkip("cjk", null, "", "Japanese", null) === null);
 check("skip: cjk no-verdict + latin text -> low-confidence", decideSkip("cjk", null, EN, "Japanese", null) === "low-confidence");
@@ -168,6 +169,8 @@ check(
   decideSkip("cjk", { decision: "wrong-script", script: "Syriac", weight: 2 }, EN, "Japanese", null) === "low-confidence",
 );
 check("skip: other mode accepts expected text", decideSkip("other", null, EN, "English", null) === null);
+check("skip: other mode accepts Korean text", decideSkip("other", null, KO, "Korean", null) === null);
+check("skip: other mode accepts Korean with Hangul verdict", decideSkip("other", { decision: "wrong-script", script: "Hangul", weight: 4 }, KO, "Korean", null) === null);
 check("skip: other mode refuses wrong text", decideSkip("other", null, JA, "Russian", null) === "low-confidence");
 check(
   "skip: auto contradiction skipped",
@@ -185,6 +188,7 @@ check("mode: auto", gateModeFor("Auto-Detect", true, false) === "auto");
 check("mode: auto-detect stays auto when gate disabled", gateModeFor("Auto-Detect", false, false) === "auto");
 check("mode: disabled gate is off for explicit source", gateModeFor("Japanese", false, false) === "off");
 check("mode: other", gateModeFor("Russian", true, false) === "other");
+check("mode: Korean is other mode", gateModeFor("Korean", true, false) === "other");
 
 // --- region build (merge / size) ------------------------------------------
 {

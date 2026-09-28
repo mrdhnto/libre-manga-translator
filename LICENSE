@@ -774,6 +774,7 @@ with semver ranges; licenses per upstream:
 | OCR (default) | PaddleOCR ONNX, per language group (`languages/<group>/rec.onnx` + `dict.txt`) | [monkt/paddleocr-onnx](https://huggingface.co/monkt/paddleocr-onnx) / PaddlePaddle | Apache-2.0 | ~90 MB shipped (Latin + Chinese/Japanese); ~15 MB per further group |
 | OCR (Japanese manga fine-tune) | PP-OCRv6 small rec manga ONNX | [fumetodev](https://huggingface.co/fumetodev/PP-OCRv6_small_rec_manga_ONNX) (base: PaddlePaddle) | Apache-2.0 | ~21 MB |
 | OCR (Japanese specialist) | Manga-OCR ONNX (ViT + BERT, 6144 vocab) | [mayocream/manga-ocr-onnx](https://huggingface.co/mayocream/manga-ocr-onnx) / kha-white | Apache-2.0 | ~460 MB |
+| OCR (Korean specialist) | Pororo OCR BrainOCR ONNX (TPS-VGG-BiLSTM, 2589 vocab) | [ogkalu/pororo](https://huggingface.co/ogkalu/pororo) / Kakao Brain | Apache-2.0 | ~74 MB |
 | Inpaint redraw (Quality rung, opt-in) | `lama-manga-dynamic.onnx` | [ogkalu/lama-manga-onnx-dynamic](https://huggingface.co/ogkalu/lama-manga-onnx-dynamic) / dreMaz / advimman | MIT | ~207 MB |
 | Local translation | WebLLM (MLC-AI) with Qwen3 4B / 8B | MLC-AI | Apache-2.0 | 3–6 GB |
 

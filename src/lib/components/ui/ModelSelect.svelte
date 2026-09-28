@@ -147,26 +147,27 @@
            hover:border-[var(--border-line)]/80 focus-visible:outline-2 focus-visible:outline-[var(--accent-cyan)] focus-visible:outline-offset-2
            {isOpen ? 'border-[var(--accent-cyan)] shadow-[0_0_8px_var(--accent-cyan-glow)]' : ''}"
   >
-    <div class="flex flex-col items-start min-w-0">
-      <div class="flex items-center gap-1.5 max-w-full">
+    <div class="flex flex-col items-start min-w-0 flex-1">
+      <div class="flex items-center gap-2 max-w-full min-w-0">
         <span class="font-display font-semibold truncate text-[var(--text-primary)]">
           {activeOption ? `${activeOption.label}` : "Select model"}
         </span>
         {#if activeOption}
-          <span class="font-mono text-[10px] text-[var(--text-dim)] shrink-0">
+          <span class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[var(--surface-panel-alt)] border border-[var(--border-faint)] text-[var(--text-dim)] shrink-0 whitespace-nowrap">
             {activeOption.size}
           </span>
         {/if}
       </div>
       {#if activeOption}
-        <div class="flex items-center gap-1 mt-0.5">
+        <div class="w-full min-w-0 flex items-center gap-1.5 mt-0.5">
           {#if activeCached}
-            <span class="text-[10px] text-[var(--accent-emerald)] font-medium">Ready</span>
+            <span class="text-[10px] text-[var(--accent-emerald)] font-medium shrink-0 whitespace-nowrap">Ready</span>
           {:else}
-            <span class="text-[10px] text-[var(--accent-amber)] font-medium">Needs download</span>
+            <span class="text-[10px] text-[var(--accent-amber)] font-medium shrink-0 whitespace-nowrap">Needs download</span>
           {/if}
           {#if activeOption.desc}
-            <span class="text-[10px] text-[var(--text-dim)] truncate">· {activeOption.desc}</span>
+            <span class="text-[10px] text-[var(--text-dim)] shrink-0">·</span>
+            <span class="text-[10px] text-[var(--text-dim)] truncate min-w-0 flex-1" title={activeOption.desc}>{activeOption.desc}</span>
           {/if}
         </div>
       {/if}
@@ -242,7 +243,7 @@
                 </div>
 
                 <div class="flex items-center gap-1.5 mb-1 flex-wrap">
-                  <span class="font-mono text-[10px] px-1.5 py-0.2 rounded bg-[var(--surface-panel)] border border-[var(--border-faint)] text-[var(--text-dim)]">
+                  <span class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[var(--surface-panel)] border border-[var(--border-faint)] text-[var(--text-dim)] shrink-0 whitespace-nowrap">
                     {opt.size}
                   </span>
                   {#if isActive && isCached}

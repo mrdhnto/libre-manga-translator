@@ -352,6 +352,9 @@ export default defineBackground(() => {
               } else if (url.toLowerCase().includes("ppocr") || cacheName.toLowerCase().includes("ppocr")) {
                 category = "OCR";
                 name = `PP-OCRv6 Manga (${url.split("/").pop()})`;
+              } else if (url.includes("pororo") || cacheName.includes("pororo") || url.includes("brainocr")) {
+                category = "OCR";
+                name = `Pororo OCR (${url.split("/").pop()})`;
               } else if (url.includes("paddleocr") || url.includes("languages/")) {
                 category = "OCR";
                 name = `PaddleOCR (${url.split("/").pop()})`;
@@ -605,7 +608,7 @@ export default defineBackground(() => {
         let prefetch: { type: string; data: string };
         if (cat === "detection") prefetch = { type: "detection", data: modelId };
         else if (cat === "inpaint") prefetch = { type: "inpaint", data: modelId };
-        else prefetch = { type: "ocr", data: modelId === "manga-ocr" || modelId === "ppocrv6-manga" ? modelId : modelId };
+        else prefetch = { type: "ocr", data: modelId === "manga-ocr" || modelId === "ppocrv6-manga" || modelId === "pororo" ? modelId : modelId };
         // Delegate to offscreen when possible, else direct download
         try {
           await ensureOffscreen();
@@ -625,6 +628,11 @@ export default defineBackground(() => {
               ]);
             } else if (data === "ppocrv6-manga") {
               await downloadArtifactHF(env.ppocrv6MangaRepo, "ppocr-rec-v6-small-manga.onnx", true);
+            } else if (data === "pororo") {
+              await Promise.all([
+                downloadArtifactHF(env.pororoModelRepo, "brainocr.onnx", true),
+                downloadArtifactHF(env.pororoModelRepo, "ocr-opt.txt", true),
+              ]);
             } else {
               const raw = data && data !== "paddle" ? String(data) : "";
               const lang = !raw ? "chinese" : (SUPPORTED_LANG_GROUPS as readonly string[]).includes(raw) ? raw : resolveLangGroup(raw).group;
@@ -752,6 +760,11 @@ export default defineBackground(() => {
           } else if (data === "ppocrv6-manga") {
             // Fixed-file engine with a bundled dict — onnx only.
             await downloadArtifactHF(env.ppocrv6MangaRepo, "ppocr-rec-v6-small-manga.onnx", true);
+          } else if (data === "pororo") {
+            await Promise.all([
+              downloadArtifactHF(env.pororoModelRepo, "brainocr.onnx", true),
+              downloadArtifactHF(env.pororoModelRepo, "ocr-opt.txt", true),
+            ]);
           } else {
             // `data` is usually a resolved lang group from the popup; accept a
             // language name too. Missing/unknown stays "chinese" (CJK focus).
