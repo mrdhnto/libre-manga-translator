@@ -200,7 +200,7 @@ browser.runtime.onMessage.addListener((msg, _, sendResponse) => {
   }
 
   if (msg.type === "OFFSCREEN_INPAINT_IMAGE") {
-    const { src, bboxes, method } = msg.data;
+    const { src, bboxes, method, alwaysInpaint } = msg.data;
     const segmentation = getCachedSegmentation(src);
 
     // "quality": standalone LaMa-first pass with Fast fallback per region.
@@ -208,8 +208,8 @@ browser.runtime.onMessage.addListener((msg, _, sendResponse) => {
     (async () => {
       await yieldToMain();
       return method === "quality"
-        ? inpaintImageQuality(src, bboxes, { segmentation })
-        : inpaintImageAuto(src, bboxes, { segmentation });
+        ? inpaintImageQuality(src, bboxes, { segmentation, alwaysInpaint })
+        : inpaintImageAuto(src, bboxes, { segmentation, alwaysInpaint });
     })()
       .then(sendResponse)
       .catch((err) => sendResponse({ error: err.message }));

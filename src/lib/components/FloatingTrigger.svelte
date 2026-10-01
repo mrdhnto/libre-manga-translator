@@ -102,11 +102,9 @@
     }
     const wasAuto = autoImg === targetImg;
     adoptMode(targetImg);
-    if (status === "idle") {
+    if (status === "idle" || status === "translated") {
       if (wasAuto) autoImg = null;
       scheduleHide();
-    } else if (status === "translated" && wasAuto) {
-      autoImg = null;
     }
   }
 
@@ -280,6 +278,7 @@
       onTranslate?.(targetImg);
     }
   }
+
 </script>
 
 {#if visible && status !== "translated"}

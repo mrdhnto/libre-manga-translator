@@ -18,6 +18,8 @@ import {
   exportCanvasToJpeg,
   quickHash,
   resolveImagePageIndex,
+  fetchAsImageBitmap,
+  inpaintBbox,
 } from "./utils";
 import "@/assets/app.css";
 
@@ -244,6 +246,7 @@ export default defineContentScript({
                     translatedSrc,
                     translations: cache.translations,
                     sourceTexts: cache.sourceTexts,
+                    cleanedSrc: cache.cleanedSrc,
                   };
                 },
 
@@ -602,7 +605,7 @@ export default defineContentScript({
                   );
                   translatedSrcMap.set(srcKey(translatedSrc), originalSrc);
 
-                  // Persist edited translations so cache re-open shows them
+                  // Persist edited translations and bboxes so cache re-open shows them
                   const cache = await storage.getItem<PageCache>(
                     `local:${await translationKey()}`,
                   );
@@ -612,11 +615,72 @@ export default defineContentScript({
                       {
                         ...cache,
                         translations,
+                        bboxes,
+                        cleanedSrc: cached?.url,
                       },
                     );
                   }
 
                   return translatedSrc;
+                },
+
+                getCleanedSrc: async (currentBboxes?: Bbox[]) => {
+                  let cached = inpaintedSrcCache.get(src);
+                  if (cached?.url) return cached.url;
+                  const boxes = currentBboxes ?? [];
+                  const res = await inpaintImage(src, boxes);
+                  cached = { url: res.url, boxesKey: "" };
+                  inpaintedSrcCache.set(src, cached);
+                  return res.url;
+                },
+
+                applyInpaintPatches: async (
+                  baseCleanedSrc: string,
+                  addedPatches: Bbox[],
+                  removedPatches: Bbox[],
+                ) => {
+                  const bitmap = await fetchAsImageBitmap(baseCleanedSrc);
+                  const canvas = document.createElement("canvas");
+                  canvas.width = bitmap.width;
+                  canvas.height = bitmap.height;
+                  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+                  ctx.drawImage(bitmap, 0, 0);
+                  bitmap.close();
+
+                  // 1. Restore raw pixels for removed areas
+                  if (removedPatches.length > 0) {
+                    const rawBitmap = await fetchAsImageBitmap(src);
+                    for (const p of removedPatches) {
+                      const x = Math.max(0, Math.round(p.x1));
+                      const y = Math.max(0, Math.round(p.y1));
+                      const w = Math.min(canvas.width - x, Math.round(p.x2 - p.x1));
+                      const h = Math.min(canvas.height - y, Math.round(p.y2 - p.y1));
+                      if (w > 0 && h > 0) {
+                        ctx.drawImage(rawBitmap, x, y, w, h, x, y, w, h);
+                      }
+                    }
+                    rawBitmap.close();
+                  }
+
+                  let currentDataUrl = canvas.toDataURL("image/png");
+
+                  // 2. Inpaint added areas
+                  if (addedPatches.length > 0) {
+                    try {
+                      const res = await inpaintImage(currentDataUrl, addedPatches);
+                      currentDataUrl = res.url;
+                    } catch (err) {
+                      console.warn("LMT: Patch inpaint via offscreen failed, using local fallback", err);
+                      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                      for (const p of addedPatches) inpaintBbox(imgData, p);
+                      ctx.putImageData(imgData, 0, 0);
+                      currentDataUrl = canvas.toDataURL("image/png");
+                    }
+                  }
+
+                  // Update cache
+                  inpaintedSrcCache.set(src, { url: currentDataUrl, boxesKey: "" });
+                  return currentDataUrl;
                 },
 
                 exportCanvasToJpeg,

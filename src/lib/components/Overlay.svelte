@@ -3,12 +3,17 @@
   import { DefaultConfig, resolveLangGroup } from "@/lib/configs";
   import { env } from "@/lib/env";
   import { probeArtifactsCached } from "@/lib/utils";
+  import { getSiteRule } from "@/lib/adapters";
+  import { resolveFontStack } from "@/lib/canvas";
   import * as Registry from "@/entrypoints/content/translation-registry";
   import {
     OverlayToolbar,
-    TextEditModal,
+    EditorToolbar,
+    InpaintCanvasEditor,
     BubbleEditor,
   } from "@/lib/components/overlay";
+  import type { InpaintPatch } from "@/lib/components/overlay/InpaintCanvasEditor.svelte";
+  import type { EditorLayer, InpaintTool } from "@/lib/components/overlay/EditorToolbar.svelte";
 
   interface Props {
     targetImageRect: DOMRect;
@@ -22,6 +27,7 @@
           translatedSrc: string;
           translations: Translations;
           sourceTexts?: string[];
+          cleanedSrc?: string;
         }
       | undefined
     >;
@@ -44,9 +50,15 @@
       translations: Translations,
       bboxes: Bbox[],
     ) => Promise<string>;
-    exportCanvasToJpeg: (canvas: HTMLCanvasElement, quality?: number) => void;
+    exportCanvasToJpeg: (canvas: HTMLCanvasElement, quality?: number, filename?: string) => void;
     onClose: () => void;
     onBackToRefine?: () => void;
+    getCleanedSrc?: (bboxes?: Bbox[]) => Promise<string>;
+    applyInpaintPatches?: (
+      baseCleanedSrc: string,
+      addedPatches: Bbox[],
+      removedPatches: Bbox[],
+    ) => Promise<string>;
   }
 
   let {
@@ -62,12 +74,20 @@
     exportCanvasToJpeg,
     onClose,
     onBackToRefine,
+    getCleanedSrc,
+    applyInpaintPatches,
   }: Props = $props();
 
   let toolbarPosition = $state({ x: 0, y: 12 }); // center-top initial, viewport-relative
   let toolbarDragStart = $state<{ startX: number; startY: number; initialX: number; initialY: number } | null>(null);
   let readingDirection = $state<"rtl" | "ltr">("rtl");
-  let mode = $state<"loading" | "refining" | "results">("loading");
+  let mode = $state<"loading" | "refining" | "results" | "editing">("loading");
+  let activeEditorLayer = $state<EditorLayer>("inpainted");
+  let activeInpaintTool = $state<InpaintTool>("none");
+  let inpaintPatches = $state<InpaintPatch[]>([]);
+  let cleanedUrl = $state("");
+  let isApplyingInpaint = $state(false);
+  let fontStack = $state("'Segoe UI', sans-serif");
   let bboxes = $state<Bbox[]>([]);
   let isManuallySorted = $state(false);
   let translatedUrl = $state("");
@@ -75,7 +95,6 @@
   let translations = $state<Translations>([]);
   let sourceTexts = $state<string[]>([]);
   let editDrafts = $state<Translations>([]);
-  let showEditPanel = $state(false);
   let previousImageUrl = $state("");
   let activeIndex = $state<number | null>(null);
   let dragInfo = $state<{
@@ -337,31 +356,71 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
     return executeTranslation();
   }
 
-  function openEditPanel() {
+  async function openEditPanel() {
     if (mode !== "results") return;
     editDrafts = translations.slice();
-    showEditPanel = true;
+    try {
+      fontStack = await resolveFontStack();
+    } catch {
+      // keep fallback
+    }
+    if (!cleanedUrl && getCleanedSrc) {
+      try {
+        cleanedUrl = await getCleanedSrc(bboxes);
+      } catch (err) {
+        console.warn("LMT: Could not fetch cleaned background image", err);
+      }
+    }
+    activeEditorLayer = "inpainted";
+    activeInpaintTool = "none";
+    inpaintPatches = [];
+    mode = "editing";
+    if (bboxes.length > 0 && activeIndex === null) {
+      activeIndex = 0;
+    }
   }
 
-  function closeEditPanel() {
-    showEditPanel = false;
-  }
+  async function applyEditorChanges() {
+    // 1. If inpaint patches exist, apply them to the cleaned canvas
+    if (inpaintPatches.length > 0 && applyInpaintPatches) {
+      isApplyingInpaint = true;
+      const added = inpaintPatches
+        .filter((p) => p.type === "add-inpaint")
+        .map((p) => ({ x1: p.x1, y1: p.y1, x2: p.x2, y2: p.y2, confidence: 1 }));
+      const removed = inpaintPatches
+        .filter((p) => p.type === "restore-raw")
+        .map((p) => ({ x1: p.x1, y1: p.y1, x2: p.x2, y2: p.y2, confidence: 1 }));
+      try {
+        cleanedUrl = await applyInpaintPatches(cleanedUrl || originalSrc, added, removed);
+        inpaintPatches = [];
+      } catch (err) {
+        showError("Failed to apply inpaint patches: " + (err as Error).message);
+      } finally {
+        isApplyingInpaint = false;
+      }
+    }
 
-  async function applyEdits() {
-    showEditPanel = false;
+    // 2. Commit text edits & repaint
+    translations = editDrafts.slice();
     mode = "loading";
     loadingMsg = "Rendering…";
     try {
       translatedUrl = await renderTranslations(
-        $state.snapshot(editDrafts),
+        $state.snapshot(translations),
         $state.snapshot(bboxes),
       );
-      translations = editDrafts.slice();
       mode = "results";
     } catch (err) {
-      mode = "results";
+      mode = "editing";
       showError((err as Error).message);
     }
+  }
+
+  function cancelEditorChanges() {
+    editDrafts = translations.slice();
+    inpaintPatches = [];
+    activeInpaintTool = "none";
+    mode = "results";
   }
 
   // Gate override escape hatch: the gate is only allowed to be strict because
@@ -403,7 +462,39 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
     }
   }
 
-  function saveJpg() {
+  async function saveJpg() {
+    let targetUrl = translatedUrl;
+    let layerType = "result";
+    if (mode === "editing") {
+      if (activeEditorLayer === "raw") {
+        targetUrl = originalSrc;
+        layerType = "raw";
+      } else if (activeEditorLayer === "cleaned") {
+        targetUrl = cleanedUrl || originalSrc;
+        layerType = "cleaned";
+      } else {
+        targetUrl = translatedUrl;
+        layerType = "result";
+      }
+    } else if (showOriginal) {
+      targetUrl = originalSrc;
+      layerType = "raw";
+    }
+
+    let siteSlug = "manga";
+    try {
+      const rule = await getSiteRule();
+      if (rule?.ruleId && rule.ruleId !== "generic") {
+        siteSlug = rule.ruleId;
+      } else {
+        siteSlug = window.location.hostname.replace(/^www\./, "").split(".")[0] || "manga";
+      }
+    } catch {
+      siteSlug = "manga";
+    }
+
+    const filename = `lmt-${siteSlug}-${layerType}-${Date.now()}.jpg`;
+
     const imageEl = new window.Image();
     imageEl.onload = () => {
       const canvas = document.createElement("canvas");
@@ -412,16 +503,15 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.drawImage(imageEl, 0, 0);
-      exportCanvasToJpeg(canvas, 0.85);
+      exportCanvasToJpeg(canvas, 0.85, filename);
     };
-    imageEl.src = translatedUrl;
+    imageEl.src = targetUrl;
   }
 
   function handleBackToRefine() {
     if (mode === "results") {
       previousImageUrl = translatedUrl;
       isManuallySorted = false;
-      showEditPanel = false;
       onBackToRefine?.();
       mode = "refining";
       Registry.markIdle(originalSrc);
@@ -431,6 +521,9 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
   function deleteActiveBox() {
     if (activeIndex !== null) {
       bboxes = bboxes.filter((_, i) => i !== activeIndex);
+      translations = translations.filter((_, i) => i !== activeIndex);
+      editDrafts = editDrafts.filter((_, i) => i !== activeIndex);
+      sourceTexts = sourceTexts.filter((_, i) => i !== activeIndex);
       isManuallySorted = true;
       saveHistory();
       activeIndex = null;
@@ -463,6 +556,9 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
         confidence: 1,
       },
     ];
+    translations = [...translations, ""];
+    editDrafts = [...editDrafts, ""];
+    sourceTexts = [...sourceTexts, ""];
     isManuallySorted = true;
     saveHistory();
     activeIndex = bboxes.length - 1;
@@ -501,15 +597,31 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
     e.stopPropagation();
   }
 
+  function shouldPreventHostClick(e: MouseEvent): boolean {
+    const target = e.target as HTMLElement | null;
+    if (!target) return true;
+    // Don't cancel native activation for form controls, interactive buttons, toolbars, or menus
+    if (
+      target.closest(
+        "input, textarea, select, label, button, [role='button'], [role='toolbar'], [role='menu'], [role='dialog'], [data-lmt-allow-click]",
+      )
+    ) {
+      return false;
+    }
+    return true;
+  }
+
   // Click needs preventDefault too: some readers wrap the img
   // in a native <a href="next-page">, and our overlay mounts inside that
   // anchor. stopPropagation alone does NOT cancel native link navigation -
   // only preventDefault() does. Box drag, textarea focus, and our own button
   // onclick all fire on mousedown/target phase, so preventing click's default
-  // action is safe and doesn't interfere with them.
+  // action on non-controls is safe and doesn't interfere with them.
   function isolateHostClick(e: MouseEvent) {
     e.stopPropagation();
-    e.preventDefault();
+    if (shouldPreventHostClick(e)) {
+      e.preventDefault();
+    }
   }
 
   onMount(async () => {
@@ -558,6 +670,7 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
       translatedUrl = initialCache.translatedSrc ?? "";
       translations = initialCache.translations ?? [];
       sourceTexts = initialCache.sourceTexts ?? [];
+      cleanedUrl = initialCache.cleanedSrc ?? "";
       Registry.markDone(originalSrc);
     } else {
       const [skipRefining, autoTranslate] = await Promise.all([
@@ -588,11 +701,18 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
       target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT");
 
     if (isEditing) {
-      // If user hits Escape while typing, close the edit panel
+      // If user hits Escape while typing, cancel the editing mode
       if (e.key === "Escape") {
         e.stopPropagation();
         e.preventDefault();
-        if (showEditPanel) showEditPanel = false;
+        if (mode === "editing") cancelEditorChanges();
+        return;
+      }
+      // If user hits Ctrl+Enter while typing, apply changes
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.stopPropagation();
+        e.preventDefault();
+        if (mode === "editing") applyEditorChanges();
         return;
       }
       // Never hijack or preventDefault typing inside edit panel textareas,
@@ -601,14 +721,14 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
       return;
     }
 
-    // Escape closes error modal first, then edit panel, then deselects box, then closes overlay
+    // Escape closes error modal first, then cancels editing, then deselects box, then closes overlay
     if (e.key === "Escape") {
       e.stopPropagation();
       e.preventDefault();
       if (errorMsg) {
         handleErrorDismiss();
-      } else if (showEditPanel) {
-        showEditPanel = false;
+      } else if (mode === "editing") {
+        cancelEditorChanges();
       } else if (activeIndex !== null) {
         activeIndex = null;
       } else {
@@ -617,8 +737,8 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
       return;
     }
 
-    // Box editing shortcuts only apply in refining mode
-    if (mode !== "refining") {
+    // Box editing shortcuts apply in refining and editing mode
+    if (mode !== "refining" && mode !== "editing") {
       e.stopPropagation();
       return;
     }
@@ -671,7 +791,9 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
           el.classList?.contains("lmt-box") ||
           el.classList?.contains("handle") ||
           el.getAttribute?.("role") === "toolbar" ||
-          el.tagName === "BUTTON",
+          el.tagName === "BUTTON" ||
+          el.tagName === "TEXTAREA" ||
+          el.tagName === "INPUT",
       );
 
       if (!isBoxOrHandle) {
@@ -759,7 +881,7 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("mouseup", handleMouseUp);
     }
-    if (mode === "refining")
+    if (mode === "refining" || mode === "editing")
       window.addEventListener("click", handleClick);
     window.addEventListener("keydown", handleKeyDown);
     const handleOpenEdit = () => {
@@ -769,7 +891,7 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
       if (mode === "results") showOriginal = !showOriginal;
     };
     const handleExport = () => {
-      if (mode === "results") saveJpg();
+      if (mode === "results" || mode === "editing") saveJpg();
     };
     const handleGeometryChange = (e: Event) => {
       const d = (
@@ -804,7 +926,7 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
     wrapper.addEventListener("lmt:geometry-change", handleGeometryChange);
 
     return () => {
-      if (mode === "refining")
+      if (mode === "refining" || mode === "editing")
         window.removeEventListener("click", handleClick);
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("mousemove", handleMouseMove);
@@ -873,7 +995,9 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
     onkeyup={isolateHostKeyboard}
     onkeypress={isolateHostKeyboard}
     onclickcapture={(e) => {
-      if (mode !== "loading") e.preventDefault();
+      if (mode !== "loading" && shouldPreventHostClick(e)) {
+        e.preventDefault();
+      }
     }}
     onclick={isolateHostClick}
   >
@@ -983,17 +1107,67 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
     />
   {/if}
 
-  <TextEditModal
-    open={showEditPanel}
-    {bboxes}
-    {sourceTexts}
-    drafts={editDrafts}
-    onApply={(updated) => {
-      editDrafts = updated;
-      applyEdits();
-    }}
-    onClose={() => (showEditPanel = false)}
-  />
+  {#if mode === "editing"}
+    <!-- Layer image rendering based on activeEditorLayer -->
+    <img
+      src={activeEditorLayer === "raw" ? originalSrc : (cleanedUrl || translatedUrl)}
+      alt="Manga Scan Layer"
+      class="w-full h-full object-contain select-none pointer-events-none"
+    />
+
+    <!-- Cleaned Scan: Inpaint Patch Surface (Add/Remove inpaint areas) -->
+    {#if activeEditorLayer === "cleaned"}
+      <InpaintCanvasEditor
+        activeTool={activeInpaintTool}
+        scaleX={liveScaleX}
+        scaleY={liveScaleY}
+        patches={inpaintPatches}
+        onAddPatch={(patch) => (inpaintPatches = [...inpaintPatches, patch])}
+        onRemovePatch={(id) => (inpaintPatches = inpaintPatches.filter((p) => p.id !== id))}
+      />
+    {/if}
+
+    <!-- Inpainted / Result Scan: Interactive Bbox Text Editor -->
+    {#if activeEditorLayer === "inpainted"}
+      <BubbleEditor
+        mode="editing"
+        {bboxes}
+        translations={editDrafts}
+        {sourceTexts}
+        scaleX={liveScaleX}
+        scaleY={liveScaleY}
+        {activeIndex}
+        {fontStack}
+        onSelectBox={(i) => (activeIndex = i)}
+        onDragStart={handleDragStart}
+        onUpdateTranslation={(i, text) => {
+          editDrafts[i] = text;
+        }}
+        onUpdateStyle={(i, style) => {
+          bboxes[i] = { ...bboxes[i], style };
+        }}
+      />
+    {/if}
+
+    <!-- Floating Right Vertical Toolbar -->
+    <EditorToolbar
+      activeLayer={activeEditorLayer}
+      activeInpaintTool={activeInpaintTool}
+      hasActiveBox={activeIndex !== null}
+      pendingPatchCount={inpaintPatches.length}
+      isApplying={isApplyingInpaint}
+      onSelectLayer={(layer) => {
+        activeEditorLayer = layer;
+        if (layer !== "cleaned") activeInpaintTool = "none";
+      }}
+      onSelectInpaintTool={(tool) => (activeInpaintTool = tool)}
+      onAddBox={addBox}
+      onDeleteBox={deleteActiveBox}
+      onDownload={saveJpg}
+      onApply={applyEditorChanges}
+      onCancel={cancelEditorChanges}
+    />
+  {/if}
 
   {#if errorMsg}
     <!-- svelte-ignore a11y_click_events_have_key_events -->

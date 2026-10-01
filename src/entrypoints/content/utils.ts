@@ -1,4 +1,5 @@
 import { env } from "@/lib/env";
+import { DefaultConfig } from "@/lib/configs";
 import { fetchAsImageBitmap } from "@/lib/utils";
 import {
   normalizeInpaintMethod,
@@ -8,6 +9,7 @@ import {
   imageToBase64,
   exportCanvasToJpeg,
   BUNDLED_FONT_STACKS,
+  resolveFontStack,
   sampleRegionAvg,
   inpaintBbox,
   inpaintLocal,
@@ -16,9 +18,11 @@ import {
 } from "@/lib/canvas";
 
 export {
+  fetchAsImageBitmap,
   imageToBase64,
   exportCanvasToJpeg,
   BUNDLED_FONT_STACKS,
+  resolveFontStack,
   sampleRegionAvg,
   inpaintBbox,
   inpaintLocal,
@@ -50,6 +54,9 @@ export async function inpaintImage(
   const method = normalizeInpaintMethod(
     await storage.getItem<string>("sync:inpaint-method"),
   );
+  const alwaysInpaint =
+    (await storage.getItem<boolean>("sync:always-inpaint")) ??
+    DefaultConfig.alwaysInpaint;
 
   // No client-side race here on purpose: heavy jobs queue behind the
   // unified backend limiter, and the backend owns the execution budget
@@ -58,7 +65,7 @@ export async function inpaintImage(
   try {
     const response = await browser.runtime.sendMessage({
       type: "INPAINT_IMAGE",
-      data: { src: imageSrc, bboxes, method },
+      data: { src: imageSrc, bboxes, method, alwaysInpaint },
     });
 
     if (response?.error) throw new Error(response.error);
@@ -89,26 +96,7 @@ export async function drawTranslations(
   bboxes: Bbox[],
   translations: Translations,
 ): Promise<string> {
-  const selectedFont =
-    (await storage.getItem<string>("sync:text-font")) ?? "Segoe UI";
-  const customFonts =
-    (await storage.getItem<{ name: string; dataUrl: string }[]>(
-      "local:custom-fonts",
-    )) ?? [];
-
-  let fontStack = BUNDLED_FONT_STACKS[selectedFont];
-
-  if (!fontStack) {
-    const custom = customFonts.find((f) => f.name === selectedFont);
-    if (custom) {
-      const face = new FontFace(custom.name, `url(${custom.dataUrl})`);
-      await face.load();
-      document.fonts.add(face);
-      fontStack = `'${custom.name}', sans-serif`;
-    } else {
-      fontStack = "'Segoe UI', sans-serif";
-    }
-  }
+  const fontStack = await resolveFontStack();
 
   const bitmap = await fetchAsImageBitmap(inpaintedSrc);
 

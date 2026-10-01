@@ -17,7 +17,6 @@ export default defineConfig({
     description: "Privacy-focused manga translator: local WebGPU, Gemini cloud, or self-hosted LLM",
     permissions: [
       "activeTab",
-      "scripting",
       "offscreen",
       "storage",
       "unlimitedStorage",
