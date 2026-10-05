@@ -4,11 +4,17 @@
   <p><i>"Translate manga directly in your browser: 100% on-device (WebGPU), cloud (Gemini), or self-hosted LLM backends"</i></p>
 
   <p>
-    <img src="https://img.shields.io/github/v/release/mrdhnto/libre-manga-translator?style=for-the-badge&logo=github&color=00ffff" alt="Version">
-    <img src="https://img.shields.io/badge/Platform-Chrome%20%7C%20Firefox-8a2be2?style=for-the-badge&logo=googlechrome" alt="Browser Support">
-    <img src="https://img.shields.io/badge/Accelerated-WebGPU-e05a2c?style=for-the-badge&logo=wgpu" alt="WebGPU">
-    <img src="https://img.shields.io/badge/Framework-Svelte%205%20%2B%20WXT-ff3e00?style=for-the-badge&logo=svelte" alt="Svelte 5">
-    <img src="https://img.shields.io/badge/License-AGPL--3.0-00ff7f?style=for-the-badge" alt="License">
+    <img src="https://img.shields.io/github/v/release/mrdhnto/libre-manga-translator?style=flat&logo=github&logoColor=white&color=00ffff" alt="Version">
+    <img src="https://img.shields.io/badge/Platform-Chrome%20%7C%20Firefox-8a2be2?style=flat&logo=googlechrome&logoColor=white" alt="Browser Support">
+    <img src="https://img.shields.io/badge/Accelerated-WebGPU-e05a2c?style=flat&logo=wgpu&logoColor=white" alt="WebGPU">
+    <img src="https://img.shields.io/badge/Framework-Svelte%205%20%2B%20WXT-ff3e00?style=flat&logo=svelte&logoColor=white" alt="Svelte 5">
+    <img src="https://img.shields.io/badge/License-AGPL--3.0-00ff7f?style=flat" alt="License">
+  </p>
+
+  <p>
+    <a href="https://github.com/mrdhnto/libre-manga-translator/releases/latest"><img src="docs/images/github-badge.svg" height="40" alt="Get it on GitHub"></a>
+    <a href="https://addons.mozilla.org/en-US/firefox/addon/libre-manga-translator/" target="_blank" rel="noopener"><img src="docs/images/firefox-badge.svg" height="40" alt="Get it on Firefox AMO"></a>
+    <a href="https://chromewebstore.google.com/detail/libre-manga-translator/ojpfedogijigmfcpckgghdeepmpaikag" target="_blank" rel="noopener"><img src="docs/images/chrome-badge.svg" height="40" alt="Get it on Chrome Web Store"></a>
   </p>
 </div>
 
@@ -342,7 +348,6 @@ The core translation engine is complete, offering a production-grade, offline-fi
 
 ### 🔧 In Progress
 
-- *Chrome Webstore* - Chrome Webstore submission still in review.
 - *Improve OCR Config* - Improving OCR reliability to get better translation results.
 - *Unit Testing* - Unit testing Check for core functionality.
 

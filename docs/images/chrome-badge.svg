@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="240" height="56" viewBox="0 0 240 56" role="img" aria-labelledby="lmt-ch-title lmt-ch-desc" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <title id="lmt-ch-title">Get it on Chrome Web Store</title>
+  <desc id="lmt-ch-desc">Download Libre Manga Translator from the Chrome Web Store.</desc>
+  <rect x="1" y="1" width="238" height="54" rx="27" fill="#FFFFFF" stroke="#DADCE0" stroke-width="1"/>
+  <svg x="12" y="12" width="32" height="32" viewBox="0 0 192 192" aria-hidden="true">
+    <path d="M0 0h192v192H0z" fill="none"/>
+    <defs><path d="M8 20v140c0 6.6 5.4 12 12 12h152c6.6 0 12-5.4 12-12V20H8zm108 32H76c-4.42 0-8-3.58-8-8s3.58-8 8-8h40c4.42 0 8 3.58 8 8s-3.58 8-8 8z" id="a"/></defs>
+    <clipPath id="b"><use overflow="visible" xlink:href="#a"/></clipPath>
+    <path clip-path="url(#b)" d="M8 20h176v152H8z" fill="#eee"/>
+    <path clip-path="url(#b)" d="M116 36H76c-4.42 0-8 3.58-8 8s3.58 8 8 8h40c4.42 0 8-3.58 8-8s-3.58-8-8-8z" fill="#fff"/>
+    <g clip-path="url(#b)"><defs><circle cx="96" cy="160" id="c" r="76"/></defs><clipPath id="d"><use overflow="visible" xlink:href="#c"/></clipPath><path clip-path="url(#d)" d="M32.07 84v93.27h34.01L96 125.45h76V84z" fill="#DB4437"/><path clip-path="url(#d)" d="M20 236h72.34l33.58-33.58v-25.14l-59.84-.01L20 98.24z" fill="#0F9D58"/><path clip-path="url(#d)" d="M96 125.45l29.92 51.82L92.35 236H172V125.45z" fill="#FFCD40"/><g clip-path="url(#d)"><circle cx="96" cy="160" fill="#F1F1F1" r="34.55"/><circle cx="96" cy="160" fill="#4285F4" r="27.64"/></g></g>
+    <path clip-path="url(#b)" d="M8 20h176v76H8z" fill="#212121" fill-opacity=".05"/>
+    <radialGradient cx="7.502" cy="19.344" gradientUnits="userSpaceOnUse" id="e" r="227.596"><stop offset="0" stop-color="#fff" stop-opacity=".1"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+    <path d="M8 20v140c0 6.6 5.4 12 12 12h152c6.6 0 12-5.4 12-12V20H8zm108 32H76c-4.42 0-8-3.58-8-8s3.58-8 8-8h40c4.42 0 8 3.58 8 8s-3.58 8-8 8z" fill="url(#e)"/>
+  </svg>
+  <text x="51" y="22" font-family="Arial, 'Liberation Sans', Helvetica, sans-serif" font-size="10" letter-spacing="1.2" fill="#5F6368">GET IT ON</text>
+  <text x="51" y="43" font-family="Arial, 'Liberation Sans', Helvetica, sans-serif" font-size="19" font-weight="700" fill="#202124">Chrome Web Store</text>
+</svg>
