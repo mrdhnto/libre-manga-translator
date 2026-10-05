@@ -9,7 +9,7 @@ First stable release. Fully on-device translation pipeline with cloud and self-h
 - **Three translation modes:** WebGPU (fully local), Gemini (cloud), API Mode (self-hosted Ollama / LM Studio / OpenAI-compatible).
 - **Bubble detection:** Comic Bubble Detector RT-DETR (default, bubbles + free text) and Comic Text Detector with pixel-mask seeding.
 - **Script gate:** on-device script verification holds back wrong-language regions instead of mistranslating them; every hold-back is one-click overridable with Translate anyway.
-- **OCR engines:** PaddleOCR multilingual (11 language packs, auto-switched per page), PP-OCRv6 Manga (lightweight Japanese fine-tune), Manga-OCR (Japanese flagship, vertical text specialist).
+- **OCR engines:** PaddleOCR multilingual (11 language packs, auto-switched per page), PP-OCRv6 Manga (lightweight Japanese fine-tune), Manga-OCR (Japanese flagship, vertical text specialist), Pororo OCR (Korean webtoon specialist, TPS-VGG-BiLSTM).
 - **Inpainting:** Fast ladder (planar fill → denoise → Telea, lightest passing rung wins) and Quality mode (LaMa neural redraw first, Fast fallback per region).
 - **Floating Translate pill:** hover any image to translate; becomes an action hub after translation (edit text, adjust boxes, original/translated toggle, JPEG export).
 - **Auto-translate:** batch-translate chapter pages as they scroll into view, one page at a time.

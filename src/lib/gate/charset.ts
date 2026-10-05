@@ -325,6 +325,6 @@ export function expectedClassesForSource(sourceLang: string): ScriptClass[] | nu
 }
 
 export const isCjkSource = (sourceLang: string): boolean =>
-  ["Japanese", "Chinese (Simplified)", "Chinese (Traditional)", "Korean"].includes(
+  ["Japanese", "Chinese (Simplified)", "Chinese (Traditional)"].includes(
     sourceLang,
   );

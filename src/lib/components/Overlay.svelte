@@ -274,9 +274,19 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
             { repo: DefaultConfig.mangaOcrRepo, path: "decoder_model.onnx" },
           ]);
           missing = !encCached || !decCached;
+        } else if (engineId === "pororo") {
+          const [recCached] = await probeArtifactsCached([
+            { repo: env.pororoModelRepo, path: "brainocr.onnx" },
+          ]);
+          missing = !recCached;
         }
         if (missing) {
-          loadingMsg = langGroup === "" ? "Downloading model…" : `Downloading ${langGroup}…`;
+          loadingMsg =
+            engineId === "pororo"
+              ? "Downloading Pororo OCR…"
+              : langGroup === ""
+                ? "Downloading model…"
+                : `Downloading ${langGroup}…`;
         }
       }
     } catch {

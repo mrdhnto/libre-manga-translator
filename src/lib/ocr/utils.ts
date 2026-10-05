@@ -201,7 +201,6 @@ const VERTICAL_LANGUAGES = [
   "Japanese",
   "Chinese (Simplified)",
   "Chinese (Traditional)",
-  "Korean",
   "Auto-Detect",
 ];
 
@@ -218,6 +217,20 @@ function detectVerticalColumns(
   ctx.drawImage(bitmap, x, y, w, h, 0, 0, w, h);
   const data = ctx.getImageData(0, 0, w, h).data;
 
+  // Sample perimeter to guess background luminance
+  let edgeSum = 0;
+  let edgeCount = 0;
+  for (let c = 0; c < w; c++) {
+    const topIdx = c * 4;
+    const botIdx = ((h - 1) * w + c) * 4;
+    edgeSum +=
+      0.299 * data[topIdx] + 0.587 * data[topIdx + 1] + 0.114 * data[topIdx + 2];
+    edgeSum +=
+      0.299 * data[botIdx] + 0.587 * data[botIdx + 1] + 0.114 * data[botIdx + 2];
+    edgeCount += 2;
+  }
+  const isDarkBg = edgeSum / (edgeCount || 1) < 128;
+
   const colSums = new Float32Array(w);
   const rowSums = new Float32Array(h);
   for (let r = 0; r < h; r++) {
@@ -225,7 +238,8 @@ function detectVerticalColumns(
       const idx = (r * w + c) * 4;
       const lum =
         0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-      if (lum < 140) {
+      const isInk = isDarkBg ? lum > 115 : lum < 140;
+      if (isInk) {
         colSums[c]++;
         rowSums[r]++;
       }
@@ -254,6 +268,7 @@ export function cropBubbleFromImage(
   bitmap: ImageBitmap,
   bbox: Bbox,
   sourceLanguage: string,
+  engineId?: string,
 ) {
   const x1 = Math.max(0, Math.min(bitmap.width - 1, Math.round(bbox.x1)));
   const y1 = Math.max(0, Math.min(bitmap.height - 1, Math.round(bbox.y1)));
@@ -262,12 +277,15 @@ export function cropBubbleFromImage(
   const w = x2 - x1;
   const h = y2 - y1;
 
-  const isVerticalLanguage = VERTICAL_LANGUAGES.includes(sourceLanguage);
+  // Korean webtoons/manhwa are horizontal text lines; Pororo OCR only recognizes upright text.
+  const isKorean = sourceLanguage === "Korean" || engineId === "pororo";
+  const isVerticalLanguage =
+    !isKorean && VERTICAL_LANGUAGES.includes(sourceLanguage);
+
   let shouldRotate = false;
   if (isVerticalLanguage) {
-    if (h / w >= 1.25) {
-      shouldRotate = true;
-    } else if (h / w >= 0.8) {
+    // Only rotate if column variance confirms vertical layout; do not blindly rotate tall horizontal bubbles
+    if (h / w >= 0.8) {
       shouldRotate = detectVerticalColumns(bitmap, x1, y1, w, h);
     }
   }

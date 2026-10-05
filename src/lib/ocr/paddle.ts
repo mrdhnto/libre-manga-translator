@@ -156,6 +156,7 @@ export class PaddleOcrEngine implements OcrEngine {
             bitmap,
             bboxes[bboxIdx],
             sourceLang,
+            this.id,
           );
           const normalizedCrop = normalizePolarity(rawCrop);
           const boostedCrop = boostContrast(normalizedCrop);

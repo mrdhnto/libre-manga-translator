@@ -517,12 +517,24 @@
 
         <!-- Detection Engine -->
         <div class="panel-card !p-2 flex flex-col justify-between gap-1.5">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-medium">Detector</span>
-            <span class="text-[11px] text-[var(--text-dim)]">{detectionModel}</span>
+          <div class="flex items-center justify-between gap-1.5 min-w-0">
+            <span class="text-xs font-medium shrink-0">Detector</span>
+            <button
+              type="button"
+              onclick={() => (detectionModel = detectionModel === "comic-bubble" ? "comic-text-detector" : "comic-bubble")}
+              aria-pressed={detectionModel === "comic-text-detector"}
+              class="text-[11px] font-medium px-2 py-0.5 rounded-md border cursor-pointer transition-colors shrink-0 whitespace-nowrap
+                     {detectionModel === 'comic-text-detector'
+                       ? 'bg-[var(--accent-cyan-soft)] border-[var(--accent-cyan)]/40 text-[var(--accent-cyan)]'
+                       : 'border-[var(--border-line)] text-[var(--text-dim)] hover:text-[var(--text-primary)]'}"
+            >
+              {detectionModel === "comic-text-detector" ? "Text+Mask" : "Bubble"}
+            </button>
           </div>
           <span class="text-[11px] text-[var(--text-dim)] leading-tight truncate">
-            {DefaultConfig.detectionModels.find((m) => m.id === detectionModel)?.desc || "text detector"}
+            {detectionModel === "comic-text-detector"
+              ? "Boxes + segmentation mask"
+              : "Bubble & free text (Fast)"}
           </span>
         </div>
       </section>

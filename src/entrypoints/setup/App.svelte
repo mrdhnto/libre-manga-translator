@@ -383,6 +383,7 @@
   function ocrEngineLabel(): string {
     if (selectedOcrEngine === "manga-ocr") return "Manga-OCR";
     if (selectedOcrEngine === "ppocrv6-manga") return "PP-OCRv6 Manga";
+    if (selectedOcrEngine === "pororo") return "Pororo OCR";
     return "PaddleOCR";
   }
 
@@ -397,6 +398,11 @@
       ocrCached = await isArtifactCached(
         env.ppocrv6MangaRepo,
         "ppocr-rec-v6-small-manga.onnx",
+      );
+    } else if (selectedOcrEngine === "pororo") {
+      ocrCached = await isArtifactCached(
+        env.pororoModelRepo,
+        "brainocr.onnx",
       );
     } else {
       const [latinRec, latinDict, chineseRec, chineseDict] = await Promise.all([
@@ -468,6 +474,18 @@
             ocrProgressText = `PP-OCRv6: ${(loaded / 1024 / 1024).toFixed(1)} MB${total > 0 ? ` / ${(total / 1024 / 1024).toFixed(1)} MB` : ""}`;
           },
         );
+      } else if (selectedOcrEngine === "pororo") {
+        ocrProgressText = "Downloading Pororo OCR (1/2)...";
+        await fetchAndCacheWithProgress(
+          env.pororoModelRepo,
+          "brainocr.onnx",
+          (loaded, total) => {
+            const pct = total > 0 ? Math.round((loaded / total) * 80) : 0;
+            ocrProgress = pct;
+            ocrProgressText = `Pororo OCR: ${(loaded / 1024 / 1024).toFixed(1)} MB${total > 0 ? ` / ${(total / 1024 / 1024).toFixed(1)} MB` : ""}`;
+          },
+        );
+        await fetchAndCacheWithProgress(env.pororoModelRepo, "ocr-opt.txt");
       } else {
         const packProgress = (stepIndex: number, steps: number) => (loaded: number, total: number) => {
           const base = ((stepIndex - 1) / steps) * 80;
@@ -1093,23 +1111,29 @@
                         ? 'border-[var(--accent-cyan)] shadow-[0_0_14px_var(--accent-cyan-glow)]'
                         : 'border-[var(--border-line)] hover:border-[var(--border-line)]/80'}"
                     >
-                      <div class="flex items-center justify-between mb-1">
-                        <div class="flex items-center gap-1.5">
+                      <div class="flex items-start justify-between gap-2 mb-1.5 min-w-0">
+                        <div class="flex items-start gap-1.5 min-w-0 flex-1">
                           <Cpu
-                            size={13}
-                            class={detectionModel === model.id
-                              ? "text-[var(--accent-cyan)]"
-                              : "text-[var(--text-dim)]"}
+                            size={14}
+                            class="shrink-0 mt-0.5 {detectionModel === model.id
+                              ? 'text-[var(--accent-cyan)]'
+                              : 'text-[var(--text-dim)]'}"
                           />
                           <span
-                            class="text-xs font-display font-bold {detectionModel === model.id
+                            class="text-xs font-display font-bold leading-snug {detectionModel === model.id
                               ? 'text-[var(--accent-cyan)]'
                               : 'text-[var(--text-primary)]'}"
                           >
                             {model.label}
                           </span>
                         </div>
-                        <span class="text-[10px] font-mono {detectionModel === model.id ? 'text-[var(--accent-cyan)] font-semibold' : 'text-[var(--text-dim)]'}">{model.size}</span>
+                        <span
+                          class="badge-cyber text-[10px] font-mono shrink-0 whitespace-nowrap !py-0.5 !px-1.5 {detectionModel === model.id
+                            ? 'is-cyan'
+                            : ''}"
+                        >
+                          {model.size}
+                        </span>
                       </div>
                       <p class="text-[11px] leading-snug {detectionModel === model.id ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}">
                         {model.desc}
@@ -1247,7 +1271,7 @@
                           <span class="text-xs font-display font-bold text-[var(--text-primary)]">
                             WebGPU (On-Device)
                           </span>
-                          <span class="badge-cyber is-amber text-[9px] !py-0.2 !px-1.5">
+                          <span class="badge-cyber is-amber text-[9px] !py-0.5 !px-1.5">
                             100% Private
                           </span>
                         </div>
@@ -1281,7 +1305,7 @@
                           <span class="text-xs font-display font-bold text-[var(--text-primary)]">
                             Gemini Cloud Direct
                           </span>
-                          <span class="badge-cyber is-emerald text-[9px] !py-0.2 !px-1.5">
+                          <span class="badge-cyber is-emerald text-[9px] !py-0.5 !px-1.5">
                             Fast &amp; Accurate
                           </span>
                         </div>
@@ -1315,7 +1339,7 @@
                           <span class="text-xs font-display font-bold text-[var(--text-primary)]">
                             API Mode (Self-Hosted)
                           </span>
-                          <span class="badge-cyber is-cyan text-[9px] !py-0.2 !px-1.5">
+                          <span class="badge-cyber is-cyan text-[9px] !py-0.5 !px-1.5">
                             Custom Server
                           </span>
                         </div>
@@ -1389,7 +1413,7 @@
                       Gemini API Key
                     </label>
                     <a
-                      href="https://aistudio.google.com/app/apikey"
+                      href="https://aistudio.google.com/app/api-keys"
                       target="_blank"
                       rel="noopener noreferrer"
                       class="inline-flex items-center gap-1 text-[11px] text-[var(--accent-cyan)] hover:underline font-medium"
@@ -1762,16 +1786,16 @@
                       ? 'border-[var(--accent-cyan)] shadow-[0_0_14px_var(--accent-cyan-glow)]'
                       : 'border-[var(--border-line)] hover:border-[var(--border-line)]/80'}"
                   >
-                    <div class="flex items-center justify-between mb-1">
-                      <div class="flex items-center gap-2">
+                    <div class="flex items-center justify-between gap-2 mb-1 min-w-0">
+                      <div class="flex items-center gap-2 min-w-0">
                         <span class="text-xs font-display font-bold {selectedOcrEngine === 'paddle' ? 'text-[var(--accent-cyan)]' : 'text-[var(--text-primary)]'}">
                           PaddleOCR (Recommended)
                         </span>
-                        <span class="badge-cyber is-cyan text-[9px] !py-0.5 !px-1.5">
+                        <span class="badge-cyber is-cyan text-[9px] !py-0.5 !px-1.5 shrink-0 whitespace-nowrap">
                           Multilingual
                         </span>
                       </div>
-                      <span class="text-[10px] font-mono {selectedOcrEngine === 'paddle' ? 'text-[var(--accent-cyan)] font-semibold' : 'text-[var(--text-dim)]'}">~90 MB</span>
+                      <span class="badge-cyber text-[10px] font-mono shrink-0 whitespace-nowrap !py-0.5 !px-1.5 {selectedOcrEngine === 'paddle' ? 'is-cyan' : ''}">~90 MB</span>
                     </div>
                     <p class="text-[11px] leading-snug {selectedOcrEngine === 'paddle' ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}">
                       Fast multilingual engine. Ships Latin + Chinese/Japanese packs (other languages download on demand).
@@ -1786,16 +1810,16 @@
                       ? 'border-[var(--accent-cyan)] shadow-[0_0_14px_var(--accent-cyan-glow)]'
                       : 'border-[var(--border-line)] hover:border-[var(--border-line)]/80'}"
                   >
-                    <div class="flex items-center justify-between mb-1">
-                      <div class="flex items-center gap-2">
+                    <div class="flex items-center justify-between gap-2 mb-1 min-w-0">
+                      <div class="flex items-center gap-2 min-w-0">
                         <span class="text-xs font-display font-bold {selectedOcrEngine === 'ppocrv6-manga' ? 'text-[var(--accent-cyan)]' : 'text-[var(--text-primary)]'}">
                           PP-OCRv6 Manga
                         </span>
-                        <span class="badge-cyber text-[9px] !py-0.5 !px-1.5">
+                        <span class="badge-cyber text-[9px] !py-0.5 !px-1.5 shrink-0 whitespace-nowrap">
                           Compact
                         </span>
                       </div>
-                      <span class="text-[10px] font-mono {selectedOcrEngine === 'ppocrv6-manga' ? 'text-[var(--accent-cyan)] font-semibold' : 'text-[var(--text-dim)]'}">~21 MB</span>
+                      <span class="badge-cyber text-[10px] font-mono shrink-0 whitespace-nowrap !py-0.5 !px-1.5 {selectedOcrEngine === 'ppocrv6-manga' ? 'is-cyan' : ''}">~21 MB</span>
                     </div>
                     <p class="text-[11px] leading-snug {selectedOcrEngine === 'ppocrv6-manga' ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}">
                       Japanese-only manga fine-tune with a minimal storage footprint.
@@ -1810,19 +1834,43 @@
                       ? 'border-[var(--accent-cyan)] shadow-[0_0_14px_var(--accent-cyan-glow)]'
                       : 'border-[var(--border-line)] hover:border-[var(--border-line)]/80'}"
                   >
-                    <div class="flex items-center justify-between mb-1">
-                      <div class="flex items-center gap-2">
+                    <div class="flex items-center justify-between gap-2 mb-1 min-w-0">
+                      <div class="flex items-center gap-2 min-w-0">
                         <span class="text-xs font-display font-bold {selectedOcrEngine === 'manga-ocr' ? 'text-[var(--accent-cyan)]' : 'text-[var(--text-primary)]'}">
                           Manga-OCR
                         </span>
-                        <span class="badge-cyber text-[9px] !py-0.5 !px-1.5">
+                        <span class="badge-cyber text-[9px] !py-0.5 !px-1.5 shrink-0 whitespace-nowrap">
                           High Accuracy
                         </span>
                       </div>
-                      <span class="text-[10px] font-mono {selectedOcrEngine === 'manga-ocr' ? 'text-[var(--accent-cyan)] font-semibold' : 'text-[var(--text-dim)]'}">~460 MB</span>
+                      <span class="badge-cyber text-[10px] font-mono shrink-0 whitespace-nowrap !py-0.5 !px-1.5 {selectedOcrEngine === 'manga-ocr' ? 'is-cyan' : ''}">~460 MB</span>
                     </div>
                     <p class="text-[11px] leading-snug {selectedOcrEngine === 'manga-ocr' ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}">
                       Deep Transformer model for complex Japanese typography and vertical text.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onclick={() => (selectedOcrEngine = "pororo")}
+                    class="w-full p-3.5 rounded-xl border text-left cursor-pointer transition-all bg-[var(--bg-void)]
+                      {selectedOcrEngine === 'pororo'
+                      ? 'border-[var(--accent-cyan)] shadow-[0_0_14px_var(--accent-cyan-glow)]'
+                      : 'border-[var(--border-line)] hover:border-[var(--border-line)]/80'}"
+                  >
+                    <div class="flex items-center justify-between gap-2 mb-1 min-w-0">
+                      <div class="flex items-center gap-2 min-w-0">
+                        <span class="text-xs font-display font-bold {selectedOcrEngine === 'pororo' ? 'text-[var(--accent-cyan)]' : 'text-[var(--text-primary)]'}">
+                          Pororo OCR
+                        </span>
+                        <span class="badge-cyber text-[9px] !py-0.5 !px-1.5 shrink-0 whitespace-nowrap">
+                          Korean Specialist
+                        </span>
+                      </div>
+                      <span class="badge-cyber text-[10px] font-mono shrink-0 whitespace-nowrap !py-0.5 !px-1.5 {selectedOcrEngine === 'pororo' ? 'is-cyan' : ''}">~74 MB</span>
+                    </div>
+                    <p class="text-[11px] leading-snug {selectedOcrEngine === 'pororo' ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}">
+                      Kakao Brain TPS-VGG-BiLSTM architecture specialized for Korean webtoons and text.
                     </p>
                   </button>
                 </div>
@@ -1900,10 +1948,10 @@
                   <!-- Component Status Badges -->
                   <div class="flex items-center gap-1.5 pt-1 border-t border-[var(--border-faint)] text-[10px] flex-wrap">
                     <span class="text-[var(--text-dim)]">Includes:</span>
-                    <span class="badge-cyber {ocrDownloaded ? 'is-emerald' : 'is-amber'} text-[9px] !py-0.2 !px-1.5">
+                    <span class="badge-cyber {ocrDownloaded ? 'is-emerald' : 'is-amber'} text-[9px] !py-0.5 !px-1.5">
                       {ocrEngineLabel()}: {ocrDownloaded ? "Cached" : "Needs download"}
                     </span>
-                    <span class="badge-cyber {gateDownloaded ? 'is-emerald' : 'is-amber'} text-[9px] !py-0.2 !px-1.5">
+                    <span class="badge-cyber {gateDownloaded ? 'is-emerald' : 'is-amber'} text-[9px] !py-0.5 !px-1.5">
                       Language Gate: {gateDownloaded ? "Cached (~3.7 MB)" : "Needs download (~3.7 MB)"}
                     </span>
                   </div>

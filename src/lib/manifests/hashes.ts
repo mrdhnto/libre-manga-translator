@@ -24,6 +24,9 @@ export const KNOWN_MODEL_SHA256: Record<string, string> = {
   "encoder_model.onnx": "15fa8155fe9bc1a7d25d9bb353debaa4def033d0174e907dbd2dd6d995def85f",
   "decoder_model.onnx": "ef7765261e9d1cdc34d89356986c2bbc2a082897f753a89605ae80fdfa61f5e8",
   "vocab.txt": "5cb5c5586d98a2f331d9f8828e4586479b0611bfba5d8c3b6dadffc84d6a36a3",
+  // Pororo OCR (ogkalu/pororo)
+  "brainocr.onnx": "25369c7dbeaed126dc5adb9f97134003b2d7fa7257861e0a4d90b5c5b2343d69",
+  "ocr-opt.txt": "dd471474e91d78e54b179333439fea58158ad1a605df010ea0936dcf4387a8c2",
   // PaddleOCR packs (monkt/paddleocr-onnx) — full-path keys; filenames collide on rec.onnx
   "languages/arabic/rec.onnx": "7982d371612785238fd99080cff36354deaec84fdc6ff7da9c82af4243fa0c9a",
   "languages/arabic/dict.txt": "637c27c88512c22089bef927b34ada08f748dc132ac70facd68d8202384c2726",

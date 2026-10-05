@@ -157,8 +157,24 @@ export function decideSkip(
   if (mode === "other") {
     if (expected && classShare(text, expected) >= MIN_EXPECTED_SHARE)
       return null;
-    if (verdict && verdict.decision === "wrong-script" && isTrustedLabel(verdict.script))
+    if (verdict && verdict.decision === "wrong-script" && isTrustedLabel(verdict.script)) {
+      // If verdict.script matches the expected script class for sourceLang (e.g. Hangul matches hangul),
+      // it is NOT a wrong script.
+      const isExpectedVerdict =
+        expected &&
+        expected.some((cls) => {
+          if (cls === "hangul") return verdict.script.startsWith("Hangul");
+          if (cls === "latin") return verdict.script === "Latin" || verdict.script === "Fraktur";
+          if (cls === "cyrillic") return verdict.script === "Cyrillic";
+          if (cls === "arabic") return verdict.script === "Arabic";
+          if (cls === "greek") return verdict.script === "Greek";
+          if (cls === "thai") return verdict.script === "Thai";
+          if (cls === "hebrew") return verdict.script === "Hebrew";
+          return false;
+        });
+      if (isExpectedVerdict) return null;
       return "not-japanese";
+    }
     return "low-confidence";
   }
 

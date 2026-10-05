@@ -88,9 +88,6 @@
     DefaultConfig.detectionModels.map((m) => ({ id: m.id, label: m.label, size: m.size, desc: m.desc })),
   );
 
-  const activeModel = $derived(
-    DefaultConfig.detectionModels.find((m) => m.id === detectionModel),
-  );
 </script>
 
 <div class="space-y-1.5">
@@ -109,14 +106,6 @@
         {progress}
         onDownload={handleDownload}
       />
-      {#if activeModel}
-        <div class="flex items-center gap-1.5 text-[11px] text-[var(--text-dim)] pt-0.5">
-          <span class="font-mono bg-[var(--bg-void)] border border-[var(--border-faint)] px-1.5 py-0.2 rounded-[2px] text-[10px] text-[var(--text-primary)]">
-            {activeModel.size}
-          </span>
-          <span class="text-[var(--text-dim)]">{activeModel.desc}</span>
-        </div>
-      {/if}
     </div>
 
     <div class="flex flex-col space-y-1.5 pt-2 border-t border-[var(--border-faint)]">

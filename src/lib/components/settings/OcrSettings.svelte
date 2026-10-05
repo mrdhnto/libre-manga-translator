@@ -37,6 +37,12 @@
       size: "~460 MB",
       desc: "Flagship model for Japanese text & vertical writing",
     },
+    {
+      id: "pororo",
+      label: "Pororo OCR",
+      size: "~74 MB",
+      desc: "Specialized Korean OCR (TPS-VGG-BiLSTM-CTC)",
+    },
   ];
 
   let cached: Record<string, boolean> = $state({});
@@ -47,6 +53,7 @@
     // Returns one or more cache entries that must all exist for the engine to be "cached"
     if (id === "manga-ocr") return [{ repo: DefaultConfig.mangaOcrRepo, path: "encoder_model.onnx" }];
     if (id === "ppocrv6-manga") return [{ repo: env.ppocrv6MangaRepo, path: "ppocr-rec-v6-small-manga.onnx" }];
+    if (id === "pororo") return [{ repo: env.pororoModelRepo, path: "brainocr.onnx" }];
     // paddle is language-dependent; check latin pack as representative (setup ships latin+chinese)
     return [{ repo: DefaultConfig.ocrRepo, path: DefaultConfig.ocrModelPath("latin") }];
   }
@@ -80,6 +87,10 @@
       } else if (id === "ppocrv6-manga") {
         await fetchAndCacheWithProgress(env.ppocrv6MangaRepo, "ppocr-rec-v6-small-manga.onnx", (l, t) => (progress = { ...progress, [id]: t > 0 ? l / t : 0 }));
         progress = { ...progress, [id]: 1 };
+      } else if (id === "pororo") {
+        await fetchAndCacheWithProgress(env.pororoModelRepo, "brainocr.onnx", (l, t) => (progress = { ...progress, [id]: t > 0 ? (l / t) * 0.95 : 0 }));
+        await fetchAndCacheWithProgress(env.pororoModelRepo, "ocr-opt.txt");
+        progress = { ...progress, [id]: 1 };
       } else {
         // paddle representative
         await fetchAndCacheWithProgress(DefaultConfig.ocrRepo, DefaultConfig.ocrModelPath("latin"), (l, t) => (progress = { ...progress, [id]: t > 0 ? l / t * 0.5 : 0 }));
@@ -105,7 +116,6 @@
     probeAll();
   });
 
-  const activeEng = $derived(ENGINES.find((e) => e.id === ocrEngine));
   const engineOptions = $derived(ENGINES.map((e) => ({ id: e.id, label: e.label, size: e.size, desc: e.desc })));
 </script>
 
@@ -125,17 +135,19 @@
         {progress}
         onDownload={handleDownload}
       />
-      {#if activeEng}
-        <div class="flex items-center gap-1.5 text-[11px] text-[var(--text-dim)] pt-0.5">
-          <span class="font-mono bg-[var(--bg-void)] border border-[var(--border-faint)] px-1.5 py-0.2 rounded-[2px] text-[10px] text-[var(--text-primary)]">
-            {activeEng.size}
-          </span>
-          <span class="text-[var(--text-dim)]">{activeEng.desc}</span>
-        </div>
-      {/if}
       {#if ocrEngine === "ppocrv6-manga" && sourceLang !== "Japanese"}
         <p class="text-[10px] text-amber-300 leading-snug border border-amber-500/20 bg-amber-950/20 rounded-[3px] px-2 py-1">
           PP-OCRv6 Manga is Japanese-only — results for {sourceLang} may be poor.
+        </p>
+      {/if}
+      {#if ocrEngine === "manga-ocr" && sourceLang !== "Japanese"}
+        <p class="text-[10px] text-amber-300 leading-snug border border-amber-500/20 bg-amber-950/20 rounded-[3px] px-2 py-1">
+          Manga-OCR is Japanese-only — results for {sourceLang} may be poor.
+        </p>
+      {/if}
+      {#if ocrEngine === "pororo" && sourceLang !== "Korean"}
+        <p class="text-[10px] text-amber-300 leading-snug border border-amber-500/20 bg-amber-950/20 rounded-[3px] px-2 py-1">
+          Pororo OCR is Korean-only — results for {sourceLang} may be poor.
         </p>
       {/if}
     </div>
