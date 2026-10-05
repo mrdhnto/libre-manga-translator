@@ -37,7 +37,7 @@ Developer-facing details for Libre Manga Translator: models, settings, pipeline 
 | Styling | Tailwind CSS |
 | Bubble / text detection | RT-DETR ONNX + ComicTextDetector ONNX via ONNX Runtime Web (`onnxruntime-web`) |
 | Script gate | OSD script-identification LSTM (~3.7 MB, ONNX Runtime Web) + Unicode-block text verification |
-| On-device OCR | PaddleOCR ONNX (`~90 MB` Latin + Chinese/Japanese packs, multilingual default), PP-OCRv6 Manga ONNX (`~21 MB`, Japanese-only manga fine-tune) or Manga-OCR ONNX (`~460 MB`, Japanese flagship) |
+| On-device OCR | PaddleOCR ONNX (`~90 MB` Latin + Chinese/Japanese packs, multilingual default), PP-OCRv6 Manga ONNX (`~21 MB`, Japanese-only manga fine-tune), Manga-OCR ONNX (`~460 MB`, Japanese flagship), or Pororo OCR ONNX (`~74 MB`, Korean specialist) |
 | Inpainting | Fast model-free engine ladder (Rung 0: Planar fill, Rung 1: Bilateral denoise, Rung 2: Telea) + independent Quality mode (standalone neural LaMa redraw, `~207 MB`, with Fast ladder fallback) |
 | Local translation | Chrome: [WebLLM](https://webllm.mlc.ai/) (Gemma3-1B / Qwen3.5-2B / Qwen3.5-4B) · Firefox: [wllama](https://github.com/ngxson/wllama) (Qwen3.5-4B / Tiny Aya GGUF) |
 | Cloud translation | Gemini API via REST |
@@ -137,7 +137,7 @@ Two selectable detectors. Switch in **Vision › Detection › Model Selection**
 | Comic Bubble Detector (RT-DETR-v2, default) | 11.1 MB | Apache-2.0 | `ogkalu/comic-text-and-bubble-detector`. Detects `bubble`, `text_bubble`, `text_free`. Good at bubbles and free-floating text. |
 | Comic Text Detector & Segmentation | 94.7 MB | GPL-3.0 | `comictextdetector.pt.onnx` (dmMaze via manga-image-translator beta-0.3). Returns text boxes plus a per-pixel segmentation mask (`[1, 1, 1024, 1024]`) upsampled to page resolution; `buildSegmentationSeed` seeds `fitMask()` directly from the mask, falling back to `buildInkSeed` when absent. |
 
-YOLO26-Nano/Small were removed post-rework (`66b018e`). Stored `yolo26n`/`yolo26s` ids auto-migrate to `comic-bubble` via `normalizeDetectionModel()` (`src/lib/configs.ts`); unknown ids throw `UNKNOWN_DETECTION_MODEL_MESSAGE` with setup-wizard directions.
+Unknown model ids throw `UNKNOWN_DETECTION_MODEL_MESSAGE` with setup-wizard directions.
 
 **Weights:**
 
@@ -206,6 +206,14 @@ LMT provides two independently selectable inpainting pipelines via `sync:inpaint
 Every attempt in both paths is validated against a single decline metric (`quality.ts`):
 - Post-edit interior edge-energy `> 2×` the 32px surrounding context, or tone distribution outside p5–p95 of the paper background triggers an automatic rollback.
 - If a method declines, the region climbs to the next ladder rung (or falls back from LaMa to Fast). If all rungs decline, the region is left completely untouched with original pixels preserved and marked with an inpainting-declined badge.
+- **Always Inpaint Override:** When `sync:always-inpaint` is enabled (toggle in popup and **Render › Inpainting**), decline rollbacks are bypassed. Text areas are always cleaned using the best passing or final available rung rather than leaving raw source pixels behind.
+
+### Multi-Layer Canvas Editor & Incremental Patches
+Post-translation editing operates across three visual layers: **Raw Scan** (original scan), **Cleaned Scan** (inpainted background), and **Result Scan** (typeset translation):
+- **Cleaned Scan Cache (`cleanedSrc`):** The inpainted background is persisted in memory (`inpaintedSrcCache`) and `local:cache`, allowing instant layer switching and rapid canvas re-renders without re-running inpainting or OCR.
+- **Inpaint Patch Tools (`InpaintCanvasEditor`):** On the cleaned layer, users can interactively draw boxes to add inpaint patches (`add-inpaint`) or restore raw artwork (`restore-raw`). `applyInpaintPatches` incrementally applies these operations onto the cleaned bitmap without re-translating.
+- **Contextual Typography & Styling:** Selecting a bubble brings up `ContextualStyleBar` to tweak font family, size, line height, alignment, and color in-place, and `FloatingRawTextPill` to inspect the underlying OCR transcript.
+- **Multi-Layer Export:** The export action respects the active editor layer, allowing users to save the final result, the cleaned background, or the raw scan to JPEG.
 
 Method picker (`src/lib/components/settings/InpaintSettings.svelte`, under **Render › Inpainting**): **Fast** (model-free ladder, default) / **Quality** (LaMa neural redraw first, with Fast ladder fallback). Per-region provenance (`{method, deviation, thickness, ms}`) and per-rung counts surface in the debug panel.
 
@@ -243,11 +251,12 @@ WXT_COMIC_TEXT_DETECTOR_URL=https://github.com/zyddnys/manga-image-translator/re
 WXT_PADDLE_OCR_MODEL_REPO=monkt/paddleocr-onnx
 WXT_MANGA_OCR_MODEL_REPO=mayocream/manga-ocr-onnx
 WXT_PPOCRV6_MANGA_REPO=fumetodev/PP-OCRv6_small_rec_manga_ONNX
+WXT_PORORO_OCR_MODEL_REPO=ogkalu/pororo
 WXT_LAMA_INPAINT_MODEL_REPO=ogkalu/lama-manga-onnx-dynamic
 WXT_GATE_MODEL_REPO=ogkalu/image-script-identification
 ```
 
-Single typed source at runtime: `src/lib/env.ts` (plus `WXT_GITHUB_REPO` for update links and `WXT_PRIVACY_URL` for onboarding). 7 model keys only — the old `WXT_YOLO_DETECTION_MODEL_REPO` / `WXT_DETECTION_MODEL_REPO` / `WXT_OCR_MODEL_REPO` names are gone.
+Single typed source at runtime: `src/lib/env.ts` (plus `WXT_GITHUB_REPO` for update links and `WXT_PRIVACY_URL` for onboarding). 8 model keys only.
 
 ## Project Structure
 
@@ -265,7 +274,7 @@ src/
     content/translation-registry.ts # Strict per-image status registry (idle/pending/done)
     offscreen/           # Isolated document: detection, OCR, gate, LLM inference, inpainting (OFFSCREEN_* handlers)
     popup/               # Extension popup (Home + Settings tabs, 360x540)
-    setup/               # Onboarding flow shown on first install
+    setup/               # Onboarding flow shown on first install (modular steps/ wizard)
 
   lib/
     adapters.ts          # Trusted core rules + URL-to-metadata matching + container/image selectors
@@ -275,10 +284,10 @@ src/
     manifests/hashes.ts  # SHA-256 manifest for model downloads
     models/updates.ts    # Manual update checker (CHECK_MODEL_UPDATES / UPDATE_CACHED_MODEL)
     components/
-      Overlay.svelte     # Translation overlay shell (refining/loading/results, cache-aware)
+      Overlay.svelte     # Translation overlay shell (refining/loading/results/editing, cache-aware)
       FloatingTrigger.svelte  # Hover translate pill + post-translation action hub
       Sidebar.svelte     # On-page sliding panel (Translate / Vision / Render / System)
-      overlay/           # BubbleRenderer + BubbleEditor + OverlayToolbar + TextEditModal
+      overlay/           # BubbleRenderer + BubbleEditor + OverlayToolbar + EditorToolbar + InpaintCanvasEditor + ContextualStyleBar + FloatingRawTextPill
       settings/          # Detection / Ocr / Backend / Typography / Inpaint / ModelStorage / ModelUpdateChecker / SiteRules / Debug / GpuAccelerationPanel / AutoTranslateToggle
       ui/ModelSelect.svelte  # Shared picker with Cached badge + download/progress
     configs.ts           # Defaults: modes, models, languages, fonts, thresholds, inpaint method, lang-group resolution
@@ -288,7 +297,7 @@ src/
     gate/                # Script gate: charset math, CTC convention, OSD session, voting/decision
     gemini/              # Gemini API client and prompt construction
     inpaint/             # Fast ladder + Quality LaMa-first: mask fit, ring stats, planar fill, denoise, LaMa, Telea, decline metric
-    ocr/                 # main.ts (coordinator) + types.ts + paddle.ts + manga-ocr.ts + utils.ts (in-tree JS CTC, zero eval)
+    ocr/                 # main.ts (coordinator) + types.ts + paddle.ts + manga-ocr.ts + pororo.ts + utils.ts (in-tree JS CTC, zero eval)
     ort.ts               # ONNX Runtime init + execution-provider resolution (delegates to hardware.ts)
     prompts.ts           # Shared prompt builders for all backends
     server/              # API Mode: schemas.ts + validator.ts + main.ts (Ollama/LM Studio)

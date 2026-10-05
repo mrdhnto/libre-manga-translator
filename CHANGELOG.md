@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.0.1 — October 5, 2026
+
+Maintenance and feature release introducing dedicated Korean OCR support, an interactive multi-layer visual canvas editor, always-inpaint controls, and other code improvements.
+
+### Added
+
+- **Pororo OCR engine:** Korean specialist engine (~74 MB ONNX, Kakao Brain TPS-VGG-BiLSTM-CTC architecture with 2,589-character vocabulary) optimized for Manhwa and Webtoon text extraction.
+- **Always Inpaint toggle:** `sync:always-inpaint` setting in popup and sidebar to force text removal even when quality checks decline, preventing leftover raw text on complex artwork.
+- **Multi-Layer Visual Canvas Editor:** Interactive in-place overlay editor supporting seamless switching across **Raw Scan**, **Cleaned Scan** (inpainted background), and **Result Scan** layers.
+- **Inpaint Patch & Restore tools:** Interactive drawing tools (`InpaintCanvasEditor`) allowing users to paint additional inpaint patches (`add-inpaint`) or restore raw artwork (`restore-raw`) directly onto the cleaned canvas.
+- **Contextual Bubble Styling & Raw Text Pill:** On-canvas typography toolbar (`ContextualStyleBar`) for instant font family, size, alignment, and color styling directly on active bubbles, alongside `FloatingRawTextPill` for real-time OCR transcript inspection.
+- **Cleaned Scan Caching:** `cleanedSrc` cached in memory (`inpaintedSrcCache`) and persisted in local page cache, enabling fast layer inspection, incremental patch application without re-translating, and multi-layer JPEG export (Raw, Cleaned, Result).
+
+### Changed
+
+- Replaced the standalone text edit modal with the integrated multi-layer canvas editor.
+- Refactored font stack resolution (`resolveFontStack`) to properly handle custom font stacks and fallbacks across the overlay editor.
+- Refined overlay event isolation to allow full interaction with form controls and text inputs while continuing to block host reader navigation.
+
+### Fixed
+
+- Handled empty OCR boxes and tightened translation schema validation edge cases.
+- Fixed overlay box deletion and addition synchronizing with draft translations and source texts.
+
 ## v1.0.0 Stable — September 25, 2026
 
 First stable release. Fully on-device translation pipeline with cloud and self-hosted options. And a rework to make UI/UX more seamless.
@@ -9,7 +33,7 @@ First stable release. Fully on-device translation pipeline with cloud and self-h
 - **Three translation modes:** WebGPU (fully local), Gemini (cloud), API Mode (self-hosted Ollama / LM Studio / OpenAI-compatible).
 - **Bubble detection:** Comic Bubble Detector RT-DETR (default, bubbles + free text) and Comic Text Detector with pixel-mask seeding.
 - **Script gate:** on-device script verification holds back wrong-language regions instead of mistranslating them; every hold-back is one-click overridable with Translate anyway.
-- **OCR engines:** PaddleOCR multilingual (11 language packs, auto-switched per page), PP-OCRv6 Manga (lightweight Japanese fine-tune), Manga-OCR (Japanese flagship, vertical text specialist), Pororo OCR (Korean webtoon specialist, TPS-VGG-BiLSTM).
+- **OCR engines:** PaddleOCR multilingual (11 language packs, auto-switched per page), PP-OCRv6 Manga (lightweight Japanese fine-tune), Manga-OCR (Japanese flagship, vertical text specialist).
 - **Inpainting:** Fast ladder (planar fill → denoise → Telea, lightest passing rung wins) and Quality mode (LaMa neural redraw first, Fast fallback per region).
 - **Floating Translate pill:** hover any image to translate; becomes an action hub after translation (edit text, adjust boxes, original/translated toggle, JPEG export).
 - **Auto-translate:** batch-translate chapter pages as they scroll into view, one page at a time.

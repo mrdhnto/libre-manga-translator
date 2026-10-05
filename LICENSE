@@ -728,12 +728,13 @@ module-by-module for maintainability. Copyright notices apply as follows:
   inpainting ladder and model management) — Copyright (C) 2026 Libre Manga Translator,
   conveyed under MIT.
 
-- **LMT v1.0.0 Stable rework** (security hardening, floating trigger and
-  bbox flow, auto-translate engine, visual redesign and codebase refactoring
-  — a major overhaul of the fork) — Copyright (C) 2026 Libre Manga Translator,
-  conveyed under AGPL-3.0-or-later. The Stable tree carries enough original
-  work that copyleft is applied here, so every derivative stays free and
-  open-source.
+- **LMT v1.0.0 Stable rework & v1.0.1 updates** (security hardening,
+  floating trigger and bbox flow, auto-translate engine, Pororo Korean OCR,
+  multi-layer visual canvas editor, always-inpaint controls, visual redesign
+  and codebase refactoring — a major overhaul of the fork) — Copyright (C) 2026
+  Libre Manga Translator, conveyed under AGPL-3.0-or-later. The Stable tree
+  carries enough original work that copyleft is applied here, so every
+  derivative stays free and open-source.
 
 ## Technique inspirations (ideas studied, no source code copied)
 
@@ -768,14 +769,14 @@ with semver ranges; licenses per upstream:
 | Purpose | Model | Upstream | License | Size |
 |---------|-------|----------|---------|------|
 | Bubble detection (default) | `comic-text-and-bubble-detector` RT-DETR-v2 | [ogkalu](https://huggingface.co/ogkalu/comic-text-and-bubble-detector) | Apache-2.0 | 11.1 MB |
-| Text boxes + segmentation (alt) | `comictextdetector.pt.onnx` | [dmMaze](https://github.com/dmMaze/comic-text-detector) via manga-image-translator | GPL-3.0 | ~95 MB |
+| Text boxes + segmentation | `comictextdetector.pt.onnx` | [dmMaze](https://github.com/dmMaze/comic-text-detector) via manga-image-translator | GPL-3.0 | ~95 MB |
 | Script gate | `image-script-identification` OSD LSTM (`osd_lstm.onnx`) | [ogkalu](https://huggingface.co/ogkalu/image-script-identification) | Apache-2.0 | ~3.7 MB |
 | OCR (default) | PaddleOCR ONNX, per language group (`languages/<group>/rec.onnx` + `dict.txt`) | [monkt/paddleocr-onnx](https://huggingface.co/monkt/paddleocr-onnx) / PaddlePaddle | Apache-2.0 | ~90 MB shipped (Latin + Chinese/Japanese); ~15 MB per further group |
 | OCR (Japanese manga fine-tune) | PP-OCRv6 small rec manga ONNX | [fumetodev](https://huggingface.co/fumetodev/PP-OCRv6_small_rec_manga_ONNX) (base: PaddlePaddle) | Apache-2.0 | ~21 MB |
 | OCR (Japanese specialist) | Manga-OCR ONNX (ViT + BERT, 6144 vocab) | [mayocream/manga-ocr-onnx](https://huggingface.co/mayocream/manga-ocr-onnx) / kha-white | Apache-2.0 | ~460 MB |
 | OCR (Korean specialist) | Pororo OCR BrainOCR ONNX (TPS-VGG-BiLSTM, 2589 vocab) | [ogkalu/pororo](https://huggingface.co/ogkalu/pororo) / Kakao Brain | Apache-2.0 | ~74 MB |
 | Inpaint redraw (Quality rung, opt-in) | `lama-manga-dynamic.onnx` | [ogkalu/lama-manga-onnx-dynamic](https://huggingface.co/ogkalu/lama-manga-onnx-dynamic) / dreMaz / advimman | MIT | ~207 MB |
-| Local translation | WebLLM (MLC-AI) with Qwen3 4B / 8B | MLC-AI | Apache-2.0 | 3–6 GB |
+| Local translation | WebLLM (MLC-AI) with Gemma3-1B / Qwen3.5-2B / Qwen3.5-4B | MLC-AI | Apache-2.0 | 0.8–4 GB |
 
 > **GPL-3.0 note:** `comictextdetector.pt.onnx` is GPL-3.0. It is never
 > bundled — weights download only when the user explicitly selects that

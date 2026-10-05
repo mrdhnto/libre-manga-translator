@@ -265,15 +265,15 @@ export async function handleMakeSiteRule(msg: any): Promise<unknown> {
 }
 
 export async function handleInpaintImage(msg: any): Promise<unknown> {
-  const { src, bboxes, method } = msg.data;
+  const { src, bboxes, method, alwaysInpaint } = msg.data;
   const segmentation = getCachedSegmentation(src);
 
   // "quality": standalone LaMa-first pass with Fast fallback per region.
   // Anything else normalizes to the Fast ladder (no model rung).
   await yieldToMain();
   return method === "quality"
-    ? inpaintImageQuality(src, bboxes, { segmentation })
-    : inpaintImageAuto(src, bboxes, { segmentation });
+    ? inpaintImageQuality(src, bboxes, { segmentation, alwaysInpaint })
+    : inpaintImageAuto(src, bboxes, { segmentation, alwaysInpaint });
 }
 
 export async function handleDeleteLlmCache(msg: any): Promise<{ success: true }> {
