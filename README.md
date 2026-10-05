@@ -89,7 +89,7 @@ Libre Manga Translator coordinates vision, OCR, translation, and inpainting thro
 
 1. **Bubble Detection** — RT-DETR or ComicTextDetector scans the manga page on-device inside an isolated offscreen document, producing accurate bounding boxes sorted in manga reading order (right-to-left, top-to-bottom).
 2. **Review & Refinement (Optional)** — An interactive on-page editor lets you resize, merge, create, or delete bubbles before translation. Enable *Skip bbox refining* or *Auto-translate* to bypass this step completely.
-3. **Script Verification & OCR** — An on-device script-identification gate inspects detected regions to ensure they contain the target language. Sound effects, art, and foreign text are held back. Multilingual PaddleOCR, PP-OCRv6 Manga, or Manga-OCR extracts text with coordinate tracking.
+3. **Script Verification & OCR** — An on-device script-identification gate inspects detected regions to ensure they contain the target language. Sound effects, art, and foreign text are held back. Multilingual PaddleOCR, PP-OCRv6 Manga, Manga-OCR, or Pororo OCR extracts text with coordinate tracking.
 4. **Translation Routing** — Text routes to your selected backend: 100% on-device WebGPU (WebLLM Gemma3 / Qwen3.5), your self-hosted LLM server via API Mode (Ollama / LM Studio), or Google's Gemini API.
 5. **Adaptive Inpainting** — A multi-stage inpainting ladder fits a text-shaped mask per region and uses the lightest suitable cleaner (planar fill → bilateral denoise → Telea, or neural LaMa redraw for complex art), ensuring clean text removal without ghost rectangles.
 6. **Typesetting & Rendering** — Translated text is automatically wrapped, sized, and rendered on the image canvas using bundled manga fonts or custom user-uploaded typography.
@@ -112,19 +112,22 @@ Libre Manga Translator coordinates vision, OCR, translation, and inpainting thro
   - **PaddleOCR** (~90 MB): Fast multilingual generalist with 11 language packs (Latin + Chinese/Japanese ship at setup; Korean, Thai, Arabic, Hindi, etc., load on first encounter).
   - **PP-OCRv6 Manga** (~21 MB): Lightweight fine-tune optimized specifically for Japanese manga text.
   - **Manga-OCR** (~460 MB): Flagship model for vertical writing, stylized lettering, and complex Japanese typography.
+  - **Pororo OCR** (~74 MB): Korean specialist engine (TPS-VGG-BiLSTM architecture with 2,589 vocabulary) optimized for Manhwa and Webtoon text extraction.
 - **Intelligent Script Gate:** An on-device script-identification model checks every bubble before translation. Non-target text, sound effects (SFX), and artwork lettering remain untouched with a dashed indicator and an optional one-click *Translate anyway* override.
 
 ### 🎨 Inpainting & Typography
 - **Fast Inpainting Ladder (Default):** Fits text-shaped masks and chooses the lightest suitable cleaner: planar paper-sampling fill on flat backgrounds, bilateral denoise on grainy scans, and Telea fast-marching only where true reconstruction is needed. Prevents ghost boxes, halos, and washed-out artifacts.
 - **Quality Neural Inpainting (LaMa):** Deep-learning redraw for complex screentones, halftones, and textured art behind text. Runs a standalone LaMa pass with automatic fallback into the Fast ladder for declined regions.
+- **Always Inpaint Mode:** Toggle in settings and popup to override quality-decline rollbacks and force inpainting across all detected regions, preventing leftover untranslated text.
 - **Custom Typography:** Ships with comic and manga fonts (Noto Sans, Bangers, Comic Neue) and allows dropping in any custom TTF, OTF, or WOFF font file with automatic font scaling.
-- **Compare & Export:** Instant toggle between original and translated artwork, plus one-click JPEG export of the final translated page.
+- **Compare & Export:** Instant toggle between original and translated artwork, plus one-click JPEG export of the final translated page (or raw/cleaned layers).
 
 ### 📖 Reader Experience & Automation
 - **Floating Hover Trigger:** Hover any manga image (`>= 260px`) to reveal a low-profile pinned **Translate** pill. After translation, it transforms into an unobtrusive action hub for editing, adjusting boxes, or toggling view modes.
 - **Continuous Auto-Translate:** Automatically detects and translates chapter pages as they scroll into the viewport with sequential queue management to prevent VRAM or API rate exhaustion.
-- **Interactive Box Editor:** Drag, resize, create, delete, and undo/redo bounding boxes arranged in right-to-left manga reading order.
-- **In-Place Translation & OCR Editor:** Inspect extracted OCR text side-by-side with translations in an edit modal. Modify translations on the fly and re-render directly to canvas without re-running inpainting.
+- **Multi-Layer Visual Canvas Editor:** Seamlessly inspect and switch between **Raw Scan**, **Cleaned Scan** (inpainted background), and **Result Scan** layers.
+- **Interactive Inpaint Patch & Restore:** Paint additional inpaint patches or restore raw original artwork directly on the cleaned canvas without re-translating.
+- **Contextual In-Place Styling:** In-canvas floating toolbar (`ContextualStyleBar`) to adjust font family, size, alignment, and color per bubble, plus raw OCR transcript inspection via `FloatingRawTextPill`.
 - **Series Context & Continuity:** Preserves series title, character glossaries, and the last 5 translated bubbles across chapter pages for terminology consistency.
 - **Site Rule Adapters:** Regex-based rules detect series names, chapters, and page numbers across popular manga sites, with an integrated AI rule generator to create new adapters in seconds.
 
@@ -300,7 +303,7 @@ That is it. The next build picks the file up automatically - no registry to edit
 
 ## Detection Models
 
-Two selectable detectors, all on-device: Comic Bubble Detector RT-DETR (default, 11.1 MB, bubbles + free text) and Comic Text Detector with pixel-mask seeding (94.7 MB, denser bubbles + free text). Switch in **Vision › Detection** (popup `Home` quick pick or sidebar/popup settings, `ModelSelect` with `Cached`/download). Min Confidence 0.5. YOLO26 models were removed post-rework; stored `yolo26n`/`yolo26s` ids auto-migrate to the RT-DETR default via `normalizeDetectionModel()`.
+Two selectable detectors, all on-device: Comic Bubble Detector RT-DETR (default, 11.1 MB, bubbles + free text) and Comic Text Detector with pixel-mask seeding (94.7 MB, denser bubbles + free text). Switch in **Vision › Detection** (popup `Home` quick pick or sidebar/popup settings, `ModelSelect` with `Cached`/download). Min Confidence 0.5.
 
 Full table with licenses and weight links: [docs/technical.md](docs/technical.md).
 
@@ -308,7 +311,7 @@ Full table with licenses and weight links: [docs/technical.md](docs/technical.md
 
 ## Tech Stack
 
-WXT + Svelte 5 + TypeScript + Tailwind CSS. On-device detection (RT-DETR / ComicTextDetector), OCR (PaddleOCR / PP-OCRv6 Manga / Manga-OCR), and Fast inpaint ladder (planar fill / denoise / Telea) or Quality LaMa-first pass via ONNX Runtime Web; WebLLM (Gemma3 / Qwen3.5), Gemini, or self-hosted LLM for translation. Bun for builds.
+WXT + Svelte 5 + TypeScript + Tailwind CSS. On-device detection (RT-DETR / ComicTextDetector), OCR (PaddleOCR / PP-OCRv6 Manga / Manga-OCR / Pororo OCR), and Fast inpaint ladder (planar fill / denoise / Telea) or Quality LaMa-first pass via ONNX Runtime Web; WebLLM (Gemma3 / Qwen3.5), Gemini, or self-hosted LLM for translation. Bun for builds.
 
 Full layer table: [docs/technical.md](docs/technical.md).
 
@@ -324,42 +327,38 @@ Full annotated tree: [docs/technical.md](docs/technical.md).
 
 ## Roadmap & Status
 
-LMT is under active development. Releases are intentionally infrequent while
-the pipeline stabilizes - this section reflects what's actually being worked
-on right now, not just a wishlist. Check the [commit history](../../commits/development)
-for day-to-day activity between releases.
+All core functionality is now fully released. Our current focus is actively improving OCR accuracy across diverse manga/manhwa formats, Bug Fixing and elevating the overall reader and editing experience. Check the [commit history](../../commits/development) for day-to-day activity between releases.
 
-### ✅ Released (Stable v1.0.0)
+### ✅ Released
 
-The v1.0.0 release establishes LMT as a production-grade, offline-first manga translation suite with modular vision, OCR, and language models:
+The core translation engine is complete, offering a production-grade, offline-first reader experience across Chrome and Firefox:
 
-- **Unified Routing Architecture** — Full on-device WebGPU execution (WebLLM Gemma3 / Qwen3.5), self-hosted API integration (Ollama, LM Studio, OpenAI-compatible), and direct cloud Gemini translation.
-- **On-Device Vision & Bubble Detection** — Integrated RT-DETR-v2 and ComicTextDetector with deterministic region ordering and an interactive on-page bounding box editor.
-- **Multilingual OCR & Script Verification** — In-tree PaddleOCR runtime with 11 language packs, Japanese-specialist Manga-OCR, PP-OCRv6 Manga fine-tune, and an on-device script verification gate to prevent mistranslating sound effects or background art.
-- **Adaptive Inpainting Ladder** — Model-free multi-rung inpaint engine (planar fill, bilateral denoise, Telea) combined with optional deep-learning LaMa redraw to eliminate ghost rectangles and clean art behind text.
-- **Integrated Reader Experience** — Zero-flicker hover translation trigger, continuous scroll auto-translation, in-place OCR and translation editing, and one-click image export.
-- **Security & Privacy Hardening** — Zero telemetry, completely local execution in WebGPU mode, SSRF-guarded image fetching, strict response schema validation, and SHA-256 model integrity verification.
+- **Three Translation Modes** — 100% on-device local translation (WebGPU / WebAssembly), private self-hosted servers (Ollama, LM Studio), or direct cloud translation (Gemini API).
+- **Vision & Multilingual OCR** — On-device speech bubble detection and multilingual text extraction (PaddleOCR, Japanese Manga-OCR, PP-OCRv6 Manga, and Korean Pororo OCR) with smart script filtering.
+- **Adaptive Inpainting & Redraw** — Seamless text removal using intelligent paper sampling and neural redraw (LaMa), backed by an "Always Inpaint" override for complex backgrounds.
+- **Multi-Layer Visual Canvas Editor** — In-place reader editor with layer switching (Raw, Cleaned, and Result), interactive inpaint patch/restore drawing tools, and contextual typography styling.
+- **Reader Automation & Ergonomics** — Zero-flicker hover translation trigger, continuous scroll auto-translation, series context memory, and one-click high-resolution image export.
+- **Privacy by Design** — Zero telemetry, no analytics, no external servers, and completely local execution.
 
 ### 🔧 In Progress
 
-- *Intermitten API Contract Fail* - Sometimes the API response fails with different bubbles count from the request.
-- *Stable Version Firefox AMO* - Porting current rework to Firefox firefox-wllama branch and updating the store.
 - *Chrome Webstore* - Chrome Webstore submission still in review.
+- *Improve OCR Config* - Improving OCR reliability to get better translation results.
+- *Unit Testing* - Unit testing Check for core functionality.
 
 ### 🐛 Known Issues (actively investigating)
 
-- *OCR reliability on Manhwa / Webtoon text* - text extraction intermittently fails on Korean formats. Either the Model Limitation or the configuration needs to be adjusted.
+- *OCR reliability on Manhwa / Webtoon text* - Pororo OCR still give poor results compared with Python Based Engine.
 
 Found a bug not listed here? Open an issue - it helps prioritize.
 
 ### 🗺️ Planned
 
-- *Automatic Test Cases* - automated tests for the core engine, pipeline, site adapters, and model management.
 - More community site adapters
 
 ---
 
-*Status as of September 2026. This list changes as issues are found and fixed
+*Status as of October 2026. This list changes as issues are found and fixed
 during dev testing - it's not a fixed commitment, just where things stand.*
 
 ---
@@ -380,7 +379,7 @@ The easiest place to start is a **site adapter PR** - add support for your favor
 
 ### Lineage & Foundations
 This project began as an evolution of **[ComicTL](https://github.com/kiuyha/ComicTL)** by Ketut Shridhara. ComicTL established the early viability of in-browser manga translation, contributing:
-- RT-DETR / YOLO bubble detection pipeline and ONNX Runtime Web integration
+- Bubble detection pipeline and ONNX Runtime Web integration
 - PaddleOCR on-device text extraction with coordinate mapping
 - Initial WebLLM translation foundation (via WebGPU)
 - Interactive bubble editor with undo/redo and reading-order sort
@@ -398,7 +397,7 @@ Following the initial fork, LMT underwent an extensive architectural rewrite (~7
 
 ### Key components and libraries
 
-Detection (RT-DETR, ComicTextDetector), script gate (OSD LSTM), OCR (PaddleOCR, PP-OCRv6 Manga, Manga-OCR), inpainting (Fast ladder + optional Quality LaMa), local translation (WebLLM Gemma3 / Qwen3.5). Built on WXT + Svelte 5 + TypeScript + Tailwind CSS (see `LICENSE` appendix for the full linked-library table).
+Detection (RT-DETR, ComicTextDetector), script gate (OSD LSTM), OCR (PaddleOCR, PP-OCRv6 Manga, Manga-OCR, Pororo OCR), inpainting (Fast ladder + optional Quality LaMa), local translation (WebLLM Gemma3 / Qwen3.5). Built on WXT + Svelte 5 + TypeScript + Tailwind CSS (see `LICENSE` appendix for the full linked-library table).
 
 Full per-model table with sizes, licenses, and weight links: [docs/technical.md](docs/technical.md). Full upstream/technique/library attributions: [LICENSE](LICENSE) appendix.
 
@@ -421,7 +420,6 @@ LMT additions © 2026 Libre Manga Translator.
 
 **Third-party model weights (on-demand, never bundled):**
 - Weights download only when needed to the user's local browser cache and follow their upstream licenses (see table in `LICENSE` / `docs/technical.md`).
-- `comictextdetector.pt.onnx` is **GPL-3.0** by dmMaze / manga-image-translator: selected explicitly by the user, fetched straight from the upstream public release. LMT's client wrapper is an independent TypeScript implementation conveyed under AGPL-3.0; no upstream code was copied.
 
 ---
 

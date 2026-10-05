@@ -39,7 +39,7 @@ export async function detectTextBubble(
   minConfidence: number = DefaultConfig.detectionMinConfidence,
   requestedModel: string = DefaultConfig.detectionModels[0].id,
 ): Promise<Bbox[]> {
-  // Defensive: migrate stale stored ids (e.g. removed YOLO) at the gate.
+  // Defensive: ensure valid detection model id at the gate.
   requestedModel = normalizeDetectionModel(requestedModel);
   if (session && currentModelName !== requestedModel) {
     try {

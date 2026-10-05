@@ -252,14 +252,10 @@ export function resolveLangGroup(sourceLang: string): ResolvedLangGroup {
 }
 
 /**
- * Migrate stored detection-model ids after YOLO removal.
- * - Removed YOLO ids ("yolo26n", "yolo26s") → "comic-bubble" (new default).
+ * Normalize stored detection-model ids.
  * - Known ids pass through untouched.
- * - Anything else passes through so the loader throws the explicit
- *   unknown-model error (with setup-wizard directions) instead of a
- *   confusing HF 404.
+ * - Falsy values fall back to the default detection model.
  */
 export function normalizeDetectionModel(id: string | null | undefined): string {
-  if (id === "yolo26n" || id === "yolo26s") return "comic-bubble";
   return id || DefaultConfig.detectionModels[0].id;
 }

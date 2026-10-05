@@ -343,9 +343,6 @@ export default defineBackground(() => {
               } else if (url.includes("comic-text-and-bubble") || url.includes("detector-v4")) {
                 category = "Detection";
                 name = "RT-DETR Bubble Detector (detector-v4-s_int8.onnx)";
-              } else if (url.includes("Manga-Bubble-YOLO") || url.includes("onnx/yolo")) {
-                category = "Detection";
-                name = url.includes("yolo26s") ? "YOLO26-Small" : "YOLO26-Nano";
               } else if (url.includes("manga-ocr") || cacheName.includes("manga-ocr")) {
                 category = "OCR";
                 name = `Manga-OCR (${url.split("/").pop()})`;
