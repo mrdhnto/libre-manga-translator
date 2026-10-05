@@ -55,6 +55,7 @@
   let cachedLlms = $state<string[]>([]);
   let textFont = $state(DefaultConfig.bundleFonts[0].id);
   let inpaintMethod = $state(DefaultConfig.inpaintMethod);
+  let alwaysInpaint = $state(DefaultConfig.alwaysInpaint);
   let ocrEngine = $state(DefaultConfig.ocrEngine);
   let customFonts = $state<{ name: string; dataUrl: string }[]>([]);
   let customRules = $state<SiteRule[]>([]);
@@ -186,6 +187,7 @@
         "local:server-api-key",
         "sync:custom-site-rules",
         "sync:inpaint-method",
+        "sync:always-inpaint",
         "sync:ocr-engine",
         "sync:script-gate",
         "local:cached-llms",
@@ -219,6 +221,7 @@
       inpaintMethod = normalizeInpaintMethod(
         saved["sync:inpaint-method"] ?? inpaintMethod,
       );
+      alwaysInpaint = saved["sync:always-inpaint"] ?? alwaysInpaint;
       scriptGate = saved["sync:script-gate"] ?? scriptGate;
       cachedLlms = Array.isArray(saved["local:cached-llms"]) ? saved["local:cached-llms"] : [];
 
@@ -256,6 +259,7 @@
         { key: "local:server-api-key", value: serverApiKey },
         { key: "sync:custom-site-rules", value: $state.snapshot(customRules) },
         { key: "sync:inpaint-method", value: inpaintMethod },
+        { key: "sync:always-inpaint", value: alwaysInpaint },
         { key: "sync:ocr-engine", value: ocrEngine },
         { key: "sync:script-gate", value: scriptGate },
       ]);
@@ -268,7 +272,7 @@
       detectionMinConfidence, skipBboxRefining, autoTranslate, autoTranslateConcurrency, ocrMinConfidence, scriptGate,
       geminiKey, geminiModel, sourceLang, targetLang, detectionModel, currentMode,
       seriesContext.seriesName, seriesContext.summary, seriesContext.dictionary,
-      textFont, customFonts.length, inpaintMethod, llmModel, llmTemperature,
+      textFont, customFonts.length, inpaintMethod, alwaysInpaint, llmModel, llmTemperature,
       serverHost, serverSchema, serverModel, useServerApiKey, serverApiKey, customRules.length,
     ];
     debouncedSave();
@@ -581,7 +585,7 @@
         <!-- ── TAB 3: RENDERING & CONTEXT ── -->
         {#if activeSection === "appearance"}
           <div class="space-y-3">
-            <InpaintSettings bind:inpaintMethod />
+            <InpaintSettings bind:inpaintMethod bind:alwaysInpaint />
 
             <TypographySettings bind:textFont bind:customFonts />
 

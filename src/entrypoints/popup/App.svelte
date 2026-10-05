@@ -50,6 +50,7 @@
   let scriptGate = $state(DefaultConfig.scriptGate);
   let ocrEngine = $state(DefaultConfig.ocrEngine);
   let inpaintMethod = $state(DefaultConfig.inpaintMethod);
+  let alwaysInpaint = $state(DefaultConfig.alwaysInpaint);
   let textFont = $state(DefaultConfig.bundleFonts[0].id);
   let customFonts = $state<{ name: string; dataUrl: string }[]>([]);
 
@@ -154,6 +155,7 @@
           "local:server-api-key",
           "sync:custom-site-rules",
           "sync:inpaint-method",
+          "sync:always-inpaint",
           "sync:ocr-engine",
           "sync:script-gate",
         ]),
@@ -189,6 +191,7 @@
       serverApiKey = saved["local:server-api-key"] ?? serverApiKey;
       customRules = Array.isArray(saved["sync:custom-site-rules"]) ? saved["sync:custom-site-rules"] : [];
       inpaintMethod = normalizeInpaintMethod(saved["sync:inpaint-method"] ?? inpaintMethod);
+      alwaysInpaint = saved["sync:always-inpaint"] ?? alwaysInpaint;
 
       const storedCtx = saved[`sync:context-${seriesName}`];
       if (storedCtx) seriesContext = { ...seriesContext, ...storedCtx };
@@ -226,6 +229,7 @@
         { key: "local:server-api-key", value: serverApiKey },
         { key: "sync:custom-site-rules", value: $state.snapshot(customRules) },
         { key: "sync:inpaint-method", value: inpaintMethod },
+        { key: "sync:always-inpaint", value: alwaysInpaint },
         { key: "sync:ocr-engine", value: ocrEngine },
       ]);
     }, 150);
@@ -237,7 +241,7 @@
       detectionMinConfidence, skipBboxRefining, autoTranslate, autoTranslateConcurrency,
       ocrMinConfidence, ocrEngine, scriptGate, geminiKey, geminiModel, sourceLang, targetLang,
       detectionModel, currentMode, seriesContext.seriesName, seriesContext.summary, seriesContext.dictionary,
-      textFont, customFonts.length, inpaintMethod, llmModel, llmTemperature, serverHost, serverSchema,
+      textFont, customFonts.length, inpaintMethod, alwaysInpaint, llmModel, llmTemperature, serverHost, serverSchema,
       serverModel, useServerApiKey, serverApiKey, customRules.length,
     ];
     debouncedSave();
@@ -537,6 +541,20 @@
               : "Bubble & free text (Fast)"}
           </span>
         </div>
+
+        <!-- Always Inpaint -->
+        <div class="col-span-2 panel-card !p-2 flex items-center justify-between gap-1.5">
+          <div class="flex flex-col">
+            <span class="text-xs font-medium">Always inpaint</span>
+            <span class="text-[11px] text-[var(--text-muted)] leading-tight">
+              {alwaysInpaint ? "Force inpaint when quality checks decline" : "Leave untouched if declined"}
+            </span>
+          </div>
+          <label class="switch-cyber is-emerald shrink-0">
+            <input type="checkbox" bind:checked={alwaysInpaint} />
+            <span class="track"><span class="thumb"></span></span>
+          </label>
+        </div>
       </section>
 
       <!-- ── SECTION 4: Active Site & Series Quick Context ── -->
@@ -605,7 +623,7 @@
           />
         </div>
 
-        <InpaintSettings bind:inpaintMethod />
+        <InpaintSettings bind:inpaintMethod bind:alwaysInpaint />
 
         <GpuAccelerationPanel />
 

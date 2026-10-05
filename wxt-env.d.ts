@@ -8,6 +8,16 @@ declare module "*.svelte" {
 
 type GateReason = "not-japanese" | "low-confidence";
 
+interface TextStyle {
+  fontSize?: number;
+  color?: string;
+  strokeColor?: string;
+  strokeWidth?: number;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+}
+
 interface Bbox {
   x1: number;
   y1: number;
@@ -18,6 +28,10 @@ interface Bbox {
   gateSkip?: GateReason;
   /** all ladder inpaint rungs declined this region */
   inpaintDeclined?: boolean;
+  /** typography and styling overrides for this text bubble */
+  style?: TextStyle;
+  /** fixed inpainting area if decoupled from render box */
+  inpaintArea?: { x1: number; y1: number; x2: number; y2: number };
 }
 
 type Translations = string[];
@@ -44,6 +58,7 @@ interface PageCache {
   bboxes: Bbox[];
   translations: Translations;
   sourceTexts?: string[];
+  cleanedSrc?: string;
 }
 
 interface TranslateResult {

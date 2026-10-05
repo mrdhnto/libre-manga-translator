@@ -23,9 +23,12 @@ export function imageToBase64(img: HTMLImageElement): string | null {
 export function exportCanvasToJpeg(
   canvas: HTMLCanvasElement,
   quality = 0.85,
+  filename?: string,
 ): void {
   const link = document.createElement("a");
-  link.download = `lmt-export-${Date.now()}.jpg`;
+  link.download = filename || `lmt-export-${Date.now()}.jpg`;
   link.href = canvas.toDataURL("image/jpeg", quality);
+  document.body.appendChild(link);
   link.click();
+  link.remove();
 }

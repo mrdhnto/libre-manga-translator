@@ -89,6 +89,7 @@ export const DefaultConfig = {
   // -> denoise -> Telea, each rung decline-gated) | "quality" (standalone
   // LaMa-first pass per region, falling back into Fast where LaMa declines)
   inpaintMethod: "fast",
+  alwaysInpaint: false,
   lamaRepo: env.lamaInpaintModelRepo,
   lamaModelPath: "lama-manga-dynamic.onnx" as `${string}.onnx`,
 

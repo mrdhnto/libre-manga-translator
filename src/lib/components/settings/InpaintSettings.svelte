@@ -6,8 +6,10 @@
 
   let {
     inpaintMethod = $bindable(DefaultConfig.inpaintMethod),
+    alwaysInpaint = $bindable(DefaultConfig.alwaysInpaint),
   }: {
     inpaintMethod: string;
+    alwaysInpaint?: boolean;
   } = $props();
 
   let lamaCached = $state(false);
@@ -228,6 +230,21 @@
         <strong class="text-[var(--text-primary)] font-medium">Neural redraw:</strong> Reconstructs screentone and artwork behind text. Regions LaMa declines fall back into Fast automatically.
       </div>
     {/if}
+
+    <div class="flex items-center justify-between pt-2 border-t border-[var(--border-faint)]">
+      <div class="flex flex-col">
+        <span class="text-[13px] font-medium text-[var(--text-primary)]">
+          Always inpaint
+        </span>
+        <span class="text-[11px] text-[var(--text-muted)]">
+          Force inpainting even if quality checks decline (never leaves text area as-is)
+        </span>
+      </div>
+      <label class="switch-cyber is-emerald">
+        <input type="checkbox" bind:checked={alwaysInpaint} />
+        <span class="track"><span class="thumb"></span></span>
+      </label>
+    </div>
 
     <div
       class="flex gap-1.5 p-2 bg-[var(--bg-void)] border border-[var(--border-line)] rounded-lg text-[var(--text-muted)] text-[11px] leading-snug"

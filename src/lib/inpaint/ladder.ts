@@ -54,6 +54,7 @@ export interface InpaintAutoResult {
 
 export interface InpaintAutoOptions {
   segmentation?: Uint8Array | null;
+  alwaysInpaint?: boolean;
 }
 
 interface PageRect {
@@ -326,15 +327,25 @@ async function paintRectFallback(
   page: ImageData,
   prep: Extract<PreparedRegion, { kind: "rect" }>,
   noiseSigma: number,
+  alwaysInpaint = false,
 ): Promise<InpaintRegionResult> {
   // No usable ink: rectangle Telea on the bbox, still decline-gated.
   const { rect, cropRgb, otherRects, index, ms } = prep;
-  const ok = await runRung(
+  let ok = await runRung(
     page,
     rect,
     () => runTelea(page, rect, cropRgb),
     () => regionDeclines(page, rect, noiseSigma, otherRects),
   );
+  if (!ok && alwaysInpaint) {
+    await runRung(
+      page,
+      rect,
+      () => runTelea(page, rect, cropRgb),
+      () => false,
+    );
+    ok = true;
+  }
   return {
     index,
     method: ok ? "rect-telea" : "declined",
@@ -383,18 +394,27 @@ export async function inpaintImageAuto(
       continue;
     }
     if (prep.kind === "rect") {
-      regions.push(await paintRectFallback(page, prep, noiseSigma));
+      regions.push(await paintRectFallback(page, prep, noiseSigma, options?.alwaysInpaint));
       continue;
     }
 
     const { fitted, cropRgb, otherRects, ms } = prep;
-    const { done, lamaError } = await runAttempts(
+    let { done, lamaError } = await runAttempts(
       page,
       i,
       fastAttempts(page, fitted, cropRgb, noiseSigma),
       noiseSigma,
       otherRects,
     );
+    if (done === "declined" && options?.alwaysInpaint) {
+      await runRung(
+        page,
+        fitted.mask,
+        () => runTelea(page, fitted.mask, cropRgb),
+        () => false,
+      );
+      done = "telea";
+    }
     regions.push({
       index: i,
       method: done,
