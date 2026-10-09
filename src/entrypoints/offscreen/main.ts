@@ -1,7 +1,7 @@
-import { UNKNOWN_DETECTION_MODEL_MESSAGE, detectTextBubble } from "@/lib/detections/main";
+import { UNKNOWN_DETECTION_MODEL_MESSAGE, detectTextBubble, releaseDetection } from "@/lib/detections/main";
 import { makeSiteRuleWithGemini, translateWithGemini } from "@/lib/gemini/main";
 import "@/assets/app.css";
-import { textRecognise } from "@/lib/ocr/main";
+import { releaseOcrEngines, textRecognise } from "@/lib/ocr/main";
 import {
   makeSiteRuleWithServer,
   translateWithServer,
@@ -11,6 +11,8 @@ import { makeSiteRuleLocal, translateLocal } from "@/lib/webllm";
 import { inpaintImageAuto, inpaintImageQuality } from "@/lib/inpaint/ladder";
 import { getCachedSegmentation } from "@/lib/detections/segmentation";
 import { checkWebGPUHighPerf, ensureWasmPaths } from "@/lib/hardware";
+import { releaseGate } from "@/lib/gate/osd";
+import { releaseLama } from "@/lib/inpaint/lama";
 import { downloadArtifactHF, yieldToMain } from "@/lib/utils";
 import { DefaultConfig, SUPPORTED_LANG_GROUPS, normalizeDetectionModel, resolveLangGroup } from "@/lib/configs";
 import { env } from "@/lib/env";
@@ -120,6 +122,7 @@ browser.runtime.onMessage.addListener((msg, _, sendResponse) => {
     } else if (currentMode === "api") {
       (async () => {
         await yieldToMain();
+        const tOcr = performance.now();
         const ocrOut = await textRecognise(
           src,
           bboxes,
@@ -130,7 +133,9 @@ browser.runtime.onMessage.addListener((msg, _, sendResponse) => {
           gateOptions,
           ocrEngine,
         );
+        const ocr = performance.now() - tOcr;
         await yieldToMain();
+        const tTrans = performance.now();
         const ocrResults = ocrOut.results;
         const res = await translateWithServer(
           ocrResults.map((r) => (r.gateSkip ? "" : r.text)),
@@ -144,12 +149,14 @@ browser.runtime.onMessage.addListener((msg, _, sendResponse) => {
           sourceTexts: ocrResults.map((r) => r.text),
           gateSkip: ocrResults.map((r) => r.gateSkip ?? null),
           gate: ocrOut.gate,
+          timing: { ocr, translate: performance.now() - tTrans },
         });
       })().catch((err) => sendResponse({ error: err.message }));
     } else {
       (async () => {
         await yieldToMain();
-        return translateWithGemini(
+        const tTrans = performance.now();
+        const res = await translateWithGemini(
           src,
           bboxes,
           geminiKey,
@@ -159,9 +166,18 @@ browser.runtime.onMessage.addListener((msg, _, sendResponse) => {
           geminiModel,
           llmTemperature,
         );
-      })()
-        .then(sendResponse)
-        .catch((err) => sendResponse({ error: err.message }));
+        // Match the webgpu/api response contract so content debug + cache
+        // never see undefined sourceTexts/gate/timing on the Gemini path
+        // (Gemini skips OCR: sourceTexts come from the validator, gate empty).
+        sendResponse({
+          ...res,
+          sourceTexts: res.sourceTexts ?? new Array(bboxes.length).fill(""),
+          gateSkip: new Array(bboxes.length).fill(null),
+          gate: { mode: "off", checked: 0, skipped: 0, unavailable: false },
+          timing: { translate: performance.now() - tTrans },
+          backend: await detectBackend(),
+        });
+      })().catch((err) => sendResponse({ error: err.message }));
     }
 
     return true;
@@ -234,9 +250,18 @@ browser.runtime.onMessage.addListener((msg, _, sendResponse) => {
   }
 
   if (msg.type === "OFFSCREEN_GPU_STATE_CHANGED") {
-    // Invalidate any cached provider-keyed sessions (OCR/Inpaint will recreate on next use).
-    // Best-effort: just acknowledge; actual recreate happens lazily in the next inference.
-    sendResponse({ success: true });
+    // Provider flip (wasm↔webgpu): drop hardware-bound sessions so the next
+    // inference recreates them with the new provider list instead of reusing stale ones.
+    const task = (async () => {
+      await Promise.allSettled([
+        releaseDetection(),
+        releaseOcrEngines(),
+        releaseGate(),
+        releaseLama(),
+      ]);
+      return { success: true };
+    })();
+    task.then(sendResponse).catch((err) => sendResponse({ success: false, error: (err as Error).message }));
     return true;
   }
 

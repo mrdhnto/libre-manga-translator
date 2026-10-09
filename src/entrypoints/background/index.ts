@@ -181,7 +181,7 @@ export default defineBackground(() => {
             );
           }
           const buf = await res.arrayBuffer();
-          return { dataUrl: arrayBufferToBase64DataUrl(buf) };
+          return { dataUrl: await arrayBufferToBase64DataUrl(buf) };
         } finally {
           if (dnr?.updateSessionRules && referer) {
             await dnr
@@ -678,7 +678,9 @@ export default defineBackground(() => {
           await ensureOffscreen();
           const res = await browser.runtime.sendMessage({ type: "OFFSCREEN_CHECK_WEBGPU_SUPPORT", data: msg.data });
           if (res && typeof res.supported === "boolean") return res;
-        } catch {}
+        } catch (err) {
+          console.warn("LMT: offscreen WebGPU probe failed, falling back to unsupported:", err);
+        }
         // Fallback: no GPU in service worker context
         return { supported: false };
       })();
@@ -694,7 +696,9 @@ export default defineBackground(() => {
           await ensureOffscreen();
           const res = await browser.runtime.sendMessage({ type: "OFFSCREEN_GET_MODEL_STATUSES", data: { modelIds: ids } });
           if (res?.statuses) return { success: true, statuses: res.statuses, downloads: res.downloads ?? {} };
-        } catch {}
+        } catch (err) {
+          console.warn("LMT: offscreen model-status probe failed:", err);
+        }
         return { success: true, statuses: {}, downloads: {} };
       })();
       keepAliveWhile(task.then(respond).catch(respondErr));
@@ -729,7 +733,9 @@ export default defineBackground(() => {
           await ensureOffscreen();
           const res = await browser.runtime.sendMessage({ type: "OFFSCREEN_GET_ACTIVE_DOWNLOADS" });
           if (res?.downloads) return { success: true, downloads: res.downloads };
-        } catch {}
+        } catch (err) {
+          console.warn("LMT: offscreen active-download probe failed:", err);
+        }
         return { success: true, downloads: {} };
       })();
       keepAliveWhile(task.then(respond).catch(respondErr));

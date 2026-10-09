@@ -34,6 +34,18 @@ async function loadDetectionSession(
   throw new Error(UNKNOWN_DETECTION_MODEL_MESSAGE(model));
 }
 
+export async function releaseDetection(): Promise<void> {
+  if (session) {
+    try {
+      await session.release();
+    } catch (error) {
+      console.warn("Failed to cleanly release the detection session:", error);
+    }
+    session = null;
+    currentModelName = null;
+  }
+}
+
 export async function detectTextBubble(
   imageSrc: string,
   minConfidence: number = DefaultConfig.detectionMinConfidence,
@@ -56,7 +68,8 @@ export async function detectTextBubble(
   }
 
   let result: Bbox[] = [];
-  runLock = runLock.then(async () => {
+  // Reset a previously rejected lock so one failure never poisons the queue.
+  runLock = runLock.catch(() => {}).then(async () => {
     if (!session) throw new Error("Detection session uninitialized");
     await yieldToMain();
 

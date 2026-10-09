@@ -185,7 +185,7 @@ export class PororoOcrEngine implements OcrEngine {
       .flat();
 
     let result!: SingleOcrResult[];
-    this.runLock = this.runLock.then(async () => {
+    this.runLock = this.runLock.catch(() => {}).then(async () => {
       result = await this.runBatches(
         crops,
         batchSize,
@@ -229,7 +229,7 @@ export class PororoOcrEngine implements OcrEngine {
         .flat();
 
       let retryResults!: SingleOcrResult[];
-      this.runLock = this.runLock.then(async () => {
+      this.runLock = this.runLock.catch(() => {}).then(async () => {
         retryResults = await this.runBatches(
           retryCrops,
           batchSize,
@@ -291,84 +291,90 @@ export class PororoOcrEngine implements OcrEngine {
       ]);
 
       await yieldToMain();
-      const inputName = this.session.inputNames[0] ?? "images";
-      const outputMap = await this.session.run({ [inputName]: inputTensor });
-      await yieldToMain();
+      let output: ort.Tensor | null = null;
+      try {
+        const inputName = this.session.inputNames[0] ?? "images";
+        const outputMap = await this.session.run({ [inputName]: inputTensor });
+        await yieldToMain();
 
-      const outputName = this.session.outputNames[0] ?? "prediction";
-      const output = outputMap[outputName];
-      const outputData = output.data as Float32Array;
+        const outputName = this.session.outputNames[0] ?? "prediction";
+        output = outputMap[outputName];
+        const outputData = output.data as Float32Array;
 
-      // Output shape is [N, TIME_STEPS, numClasses]
-      const stepStride = numClasses;
-      const batchStride = TIME_STEPS * stepStride;
+        // Output shape is [N, TIME_STEPS, numClasses]
+        const stepStride = numClasses;
+        const batchStride = TIME_STEPS * stepStride;
 
-      for (let i = 0; i < N; i++) {
-        const batchOffset = i * batchStride;
-        const decodedChars: string[] = [];
-        const keptProbs: number[] = [];
-        let prevIdx = -1;
+        for (let i = 0; i < N; i++) {
+          const batchOffset = i * batchStride;
+          const decodedChars: string[] = [];
+          const keptProbs: number[] = [];
+          let prevIdx = -1;
 
-        for (let t = 0; t < TIME_STEPS; t++) {
-          const stepOffset = batchOffset + t * stepStride;
-          let bestIdx = 0;
-          let maxLogit = -Infinity;
+          for (let t = 0; t < TIME_STEPS; t++) {
+            const stepOffset = batchOffset + t * stepStride;
+            let bestIdx = 0;
+            let maxLogit = -Infinity;
 
-          // Find argmax for time step t
-          for (let c = 0; c < numClasses; c++) {
-            const val = outputData[stepOffset + c];
-            if (val > maxLogit) {
-              maxLogit = val;
-              bestIdx = c;
-            }
-          }
-
-          // CTC collapsing: skip blank (index 0) and repeat of previous token
-          if (bestIdx !== 0 && bestIdx !== prevIdx) {
-            // Compute softmax probability for maxLogit
-            let sumExp = 0;
+            // Find argmax for time step t
             for (let c = 0; c < numClasses; c++) {
-              sumExp += Math.exp(outputData[stepOffset + c] - maxLogit);
-            }
-            const prob = 1.0 / Math.max(1e-8, sumExp);
-
-            decodedChars.push(vocab[bestIdx] ?? "");
-            keptProbs.push(prob);
-          }
-          prevIdx = bestIdx;
-        }
-
-        const text = decodedChars.join("");
-        const confidence =
-          keptProbs.length > 0
-            ? keptProbs.reduce((a, b) => a + b, 0) / keptProbs.length
-            : 0;
-
-        const textLen = text.trim().length;
-        if (confidence >= minConfidence && textLen > 0) {
-          const newText = text.trim();
-          // Single Hangul characters are full words in Korean (e.g. 네, 왜, 뭐, 응, 야);
-          // do not drop them with the ASCII-noise 0.75 penalty.
-          const isHangul = /[\uAC00-\uD7AF\u1100-\u11FF]/.test(newText);
-          const isSingleCharNoise =
-            !isHangul &&
-            textLen === 1 &&
-            confidence < Math.max(minConfidence, 0.75);
-
-          if (!isSingleCharNoise) {
-            const bboxIdx = batchData[i].originalBboxIndex;
-            const target = stitchedResults[bboxIdx];
-
-            if (target.text.endsWith("-")) {
-              target.text = target.text.slice(0, -1) + newText;
-            } else {
-              target.text += (target.text ? " " : "") + newText;
+              const val = outputData[stepOffset + c];
+              if (val > maxLogit) {
+                maxLogit = val;
+                bestIdx = c;
+              }
             }
 
-            target.totalConf += confidence;
-            target.lineCount += 1;
+            // CTC collapsing: skip blank (index 0) and repeat of previous token
+            if (bestIdx !== 0 && bestIdx !== prevIdx) {
+              // Compute softmax probability for maxLogit
+              let sumExp = 0;
+              for (let c = 0; c < numClasses; c++) {
+                sumExp += Math.exp(outputData[stepOffset + c] - maxLogit);
+              }
+              const prob = 1.0 / Math.max(1e-8, sumExp);
+
+              decodedChars.push(vocab[bestIdx] ?? "");
+              keptProbs.push(prob);
+            }
+            prevIdx = bestIdx;
+          }
+
+          const text = decodedChars.join("");
+          const confidence =
+            keptProbs.length > 0
+              ? keptProbs.reduce((a, b) => a + b, 0) / keptProbs.length
+              : 0;
+
+          const textLen = text.trim().length;
+          if (confidence >= minConfidence && textLen > 0) {
+            const newText = text.trim();
+            // Single Hangul characters are full words in Korean (e.g. 네, 왜, 뭐, 응, 야);
+            // do not drop them with the ASCII-noise 0.75 penalty.
+            const isHangul = /[\uAC00-\uD7AF\u1100-\u11FF]/.test(newText);
+            const isSingleCharNoise =
+              !isHangul &&
+              textLen === 1 &&
+              confidence < Math.max(minConfidence, 0.75);
+
+            if (!isSingleCharNoise) {
+              const bboxIdx = batchData[i].originalBboxIndex;
+              const target = stitchedResults[bboxIdx];
+
+              if (target.text.endsWith("-")) {
+                target.text = target.text.slice(0, -1) + newText;
+              } else {
+                target.text += (target.text ? " " : "") + newText;
+              }
+
+              target.totalConf += confidence;
+              target.lineCount += 1;
+            }
           }
         }
+      } finally {
+        inputTensor?.dispose?.();
+        output?.dispose?.();
       }
     }
 

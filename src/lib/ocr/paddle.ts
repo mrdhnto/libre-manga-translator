@@ -32,6 +32,7 @@ export class PaddleOcrEngine implements OcrEngine {
 
   private session: ort.InferenceSession | null = null;
   private charset: string[] | null = null;
+  private charsetKey: string | null = null;
   private currentLangGroup: string | null = null;
   /** Active provider key for mismatch-recreate (e.g. "wasm" vs "webgpu+wasm"). */
   private sessionProvider: string | null = null;
@@ -51,6 +52,7 @@ export class PaddleOcrEngine implements OcrEngine {
       }
       this.session = null;
       this.charset = null;
+      this.charsetKey = null;
       this.currentLangGroup = null;
       this.sessionProvider = null;
     }
@@ -58,10 +60,14 @@ export class PaddleOcrEngine implements OcrEngine {
 
   /**
    * Load or return cached charset for the given language group.
-   * Extracted for testability and to keep `recognize` focused on orchestration.
+   * Keyed on repo + langGroup (+ bundled dict path) so a model swap
+   * never reuses a stale dictionary from a previous language.
    */
   private async ensureCharset(repo: string, langGroup: string): Promise<string[]> {
-    if (this.charset) return this.charset;
+    const dictKey = this.opts.bundledDictPath
+      ? `bundled:${this.opts.bundledDictPath}`
+      : `${repo}:${DefaultConfig.ocrDictPath(langGroup)}`;
+    if (this.charset && this.charsetKey === dictKey) return this.charset;
     if (this.opts.bundledDictPath) {
       const url = (browser as unknown as { runtime: { getURL: (p: string) => string } }).runtime.getURL(this.opts.bundledDictPath as unknown as string);
       const res = await fetch(url);
@@ -74,6 +80,7 @@ export class PaddleOcrEngine implements OcrEngine {
       if (!dictText || dictText.trim().length === 0) throw new Error(`Empty dictionary for ${langGroup}`);
       this.charset = buildCharset(dictText);
     }
+    this.charsetKey = dictKey;
     return this.charset;
   }
 
@@ -132,7 +139,8 @@ export class PaddleOcrEngine implements OcrEngine {
       .flat();
 
     let result!: SingleOcrResult[];
-    this.runLock = this.runLock.then(async () => {
+    // Clear a previously rejected lock so one batch failure never deadlocks later pages.
+    this.runLock = this.runLock.catch(() => {}).then(async () => {
       result = await this.runBatches(
         crops,
         batchSize,
@@ -178,7 +186,7 @@ export class PaddleOcrEngine implements OcrEngine {
         .flat();
 
       let retryResults!: SingleOcrResult[];
-      this.runLock = this.runLock.then(async () => {
+      this.runLock = this.runLock.catch(() => {}).then(async () => {
         retryResults = await this.runBatches(
           retryCrops,
           batchSize,
@@ -250,40 +258,46 @@ export class PaddleOcrEngine implements OcrEngine {
       ]);
 
       await yieldToMain();
-      const inputName = this.session.inputNames[0];
-      const outputMap = await this.session.run({ [inputName]: inputTensor });
-      await yieldToMain();
-      const outputName = this.session.outputNames[0];
-      const output = outputMap[outputName];
+      let output: ort.Tensor | null = null;
+      try {
+        const inputName = this.session.inputNames[0];
+        const outputMap = await this.session.run({ [inputName]: inputTensor });
+        await yieldToMain();
+        const outputName = this.session.outputNames[0];
+        output = outputMap[outputName];
 
-      const [, T, C] = output.dims as number[];
-      const outputData = output.data as Float32Array;
+        const [, T, C] = output.dims as number[];
+        const outputData = output.data as Float32Array;
 
-      for (let i = 0; i < N; i++) {
-        const slice = outputData.slice(i * T * C, (i + 1) * T * C);
-        const decoded = ctcDecode(slice, this.charset, C, langGroup);
-        const textLen = decoded.text.trim().length;
+        for (let i = 0; i < N; i++) {
+          const slice = outputData.slice(i * T * C, (i + 1) * T * C);
+          const decoded = ctcDecode(slice, this.charset, C, langGroup);
+          const textLen = decoded.text.trim().length;
 
-        if (decoded.confidence >= minConfidence) {
-          const isSingleCharNoise =
-            textLen === 1 && decoded.confidence < Math.max(minConfidence, 0.75);
+          if (decoded.confidence >= minConfidence) {
+            const isSingleCharNoise =
+              textLen === 1 && decoded.confidence < Math.max(minConfidence, 0.75);
 
-          if (!isSingleCharNoise && textLen > 0) {
-            const bboxIdx = batchData[i].originalBboxIndex;
-            const target = stitchedResults[bboxIdx];
+            if (!isSingleCharNoise && textLen > 0) {
+              const bboxIdx = batchData[i].originalBboxIndex;
+              const target = stitchedResults[bboxIdx];
 
-            const newText = decoded.text.trim();
+              const newText = decoded.text.trim();
 
-            if (target.text.endsWith("-")) {
-              target.text = target.text.slice(0, -1) + newText;
-            } else {
-              target.text += (target.text ? " " : "") + newText;
+              if (target.text.endsWith("-")) {
+                target.text = target.text.slice(0, -1) + newText;
+              } else {
+                target.text += (target.text ? " " : "") + newText;
+              }
+
+              target.totalConf += decoded.confidence;
+              target.lineCount += 1;
             }
-
-            target.totalConf += decoded.confidence;
-            target.lineCount += 1;
           }
         }
+      } finally {
+        inputTensor?.dispose?.();
+        output?.dispose?.();
       }
     }
 

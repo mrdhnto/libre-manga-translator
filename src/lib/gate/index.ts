@@ -127,6 +127,87 @@ const rescueHolds = (text: string): boolean =>
   cjkShare(text) >= MIN_CJK_SHARE && japaneseCharCount(text) >= MIN_RESCUE_CHARS;
 
 /**
+ * Shared rescue check: the rec text itself overturns a verdict the OSD model
+ * was not entitled to reach alone (tall kana columns misread as Tibetan, …).
+ * `clean` verdicts never need rescuing — callers check that first.
+ */
+function shouldRescue(text: string, verdict: RegionVerdict | null): boolean {
+  return rescueHolds(text) && (!verdict || verdict.decision !== "clean");
+}
+
+/** Does an OSD label name the script the user explicitly selected? */
+function verdictMatchesExpected(
+  verdictScript: string,
+  expected: ScriptClass[] | null,
+): boolean {
+  if (!expected) return false;
+  if (expected.some((cls) => cls === "hangul"))
+    return verdictScript.startsWith("Hangul");
+  if (expected.some((cls) => cls === "latin"))
+    return verdictScript === "Latin" || verdictScript === "Fraktur";
+  if (expected.some((cls) => cls === "cyrillic"))
+    return verdictScript === "Cyrillic";
+  if (expected.some((cls) => cls === "arabic"))
+    return verdictScript === "Arabic";
+  if (expected.some((cls) => cls === "greek"))
+    return verdictScript === "Greek";
+  if (expected.some((cls) => cls === "thai"))
+    return verdictScript === "Thai";
+  if (expected.some((cls) => cls === "hebrew"))
+    return verdictScript === "Hebrew";
+  return false;
+}
+
+function decideSkipCjk(
+  verdict: RegionVerdict | null,
+  text: string,
+): GateReason | null {
+  if (!verdict || verdict.decision === "uncertain") {
+    // No OSD opinion (or none that counted): text-only verification.
+    if (!verdict)
+      return cjkShare(text) >= MIN_CJK_SHARE ? null : "low-confidence";
+    return shouldRescue(text, verdict) ? null : "low-confidence";
+  }
+  if (verdict.decision === "clean") return null;
+  // wrong-script: trusted stands alone; untrusted needs the text rescue.
+  if (shouldRescue(text, verdict)) return null;
+  return isTrustedLabel(verdict.script) ? "not-japanese" : "low-confidence";
+}
+
+function decideSkipOther(
+  verdict: RegionVerdict | null,
+  text: string,
+  expected: ScriptClass[] | null,
+): GateReason | null {
+  if (expected && classShare(text, expected) >= MIN_EXPECTED_SHARE)
+    return null;
+  if (verdict?.decision === "wrong-script" && isTrustedLabel(verdict.script)) {
+    // A verdict naming the selected script is not a contradiction.
+    return verdictMatchesExpected(verdict.script, expected)
+      ? null
+      : "not-japanese";
+  }
+  return "low-confidence";
+}
+
+function decideSkipAuto(
+  verdict: RegionVerdict | null,
+  pageLabel: string | null,
+): GateReason | null {
+  if (!pageLabel || !verdict || verdict.decision === "uncertain") return null;
+  const sameSide =
+    isCjkLabel(pageLabel) === isCjkLabel(verdict.script) ||
+    baseLabel(pageLabel) === baseLabel(verdict.script);
+  if (sameSide) return null;
+  // A verdict the model is not entitled to reach alone never contradicts
+  // the page majority. No text rescue here: the rescue exists for
+  // untrusted pixel misreads, not for disagreeing with the page majority.
+  if (!isTrustedLabel(verdict.script) && !isCjkLabel(verdict.script))
+    return null;
+  return "not-japanese";
+}
+
+/**
  * Final per-region skip decision, run AFTER recognition (the rescue reads the
  * rec text; pre-OCR only the trusted wrong-script refusal can pre-filter, in
  * `textRecognise`). `null` = translate.
@@ -140,59 +221,13 @@ export function decideSkip(
 ): GateReason | null {
   if (mode === "off" || !text) return null;
 
-  if (mode === "cjk") {
-    if (!verdict || verdict.decision === "uncertain") {
-      // no OSD opinion (or none that counted): text-only verification, and
-      // for flagged-but-read regions the rescue lands here too
-      if (!verdict) return cjkShare(text) >= MIN_CJK_SHARE ? null : "low-confidence";
-      return rescueHolds(text) ? null : "low-confidence";
-    }
-    if (verdict.decision === "clean") return null;
-    // wrong-script: trusted stands alone; untrusted needs the text rescue
-    if (rescueHolds(text)) return null;
-    return isTrustedLabel(verdict.script) ? "not-japanese" : "low-confidence";
-  }
+  if (mode === "cjk") return decideSkipCjk(verdict, text);
 
-  const expected = expectedClassesForSource(sourceLang);
-  if (mode === "other") {
-    if (expected && classShare(text, expected) >= MIN_EXPECTED_SHARE)
-      return null;
-    if (verdict && verdict.decision === "wrong-script" && isTrustedLabel(verdict.script)) {
-      // If verdict.script matches the expected script class for sourceLang (e.g. Hangul matches hangul),
-      // it is NOT a wrong script.
-      const isExpectedVerdict =
-        expected &&
-        expected.some((cls) => {
-          if (cls === "hangul") return verdict.script.startsWith("Hangul");
-          if (cls === "latin") return verdict.script === "Latin" || verdict.script === "Fraktur";
-          if (cls === "cyrillic") return verdict.script === "Cyrillic";
-          if (cls === "arabic") return verdict.script === "Arabic";
-          if (cls === "greek") return verdict.script === "Greek";
-          if (cls === "thai") return verdict.script === "Thai";
-          if (cls === "hebrew") return verdict.script === "Hebrew";
-          return false;
-        });
-      if (isExpectedVerdict) return null;
-      return "not-japanese";
-    }
-    return "low-confidence";
-  }
+  if (mode === "other")
+    return decideSkipOther(verdict, text, expectedClassesForSource(sourceLang));
 
-  // auto: additive - only a confident contradiction of the page majority
-  if (mode === "auto") {
-    if (!pageLabel || !verdict || verdict.decision === "uncertain")
-      return null;
-    const sameSide =
-      isCjkLabel(pageLabel) === isCjkLabel(verdict.script) ||
-      baseLabel(pageLabel) === baseLabel(verdict.script);
-    if (sameSide) return null;
-    // a verdict the model is not entitled to reach alone never contradicts
-    if (!isTrustedLabel(verdict.script) && !isCjkLabel(verdict.script))
-      return null;
-    // No text rescue here: the rescue exists for untrusted pixel misreads,
-    // not for disagreeing with the page's own majority.
-    return "not-japanese";
-  }
+  // auto: additive — only a confident contradiction of the page majority skips.
+  if (mode === "auto") return decideSkipAuto(verdict, pageLabel);
   return null;
 }
 

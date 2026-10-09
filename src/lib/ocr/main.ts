@@ -48,6 +48,16 @@ export function getOcrEngine(id = DefaultConfig.ocrEngine): OcrEngine {
   return paddleEngine;
 }
 
+/** Release all OCR engine sessions so a GPU provider flip recreates them lazily. */
+export async function releaseOcrEngines(): Promise<void> {
+  await Promise.all([
+    paddleEngine.release?.(),
+    mangaOcrEngine.release?.(),
+    pororoEngine.release?.(),
+    ppocrv6MangaEngine.release?.(),
+  ].filter(Boolean));
+}
+
 /**
  * Agnostic OCR Coordinator with script gate:
  * 1. Line-slicing & contrast normalization
@@ -73,112 +83,119 @@ export async function textRecognise(
   );
 
   const bitmap = await fetchAsImageBitmap(imageSrc);
+  try {
+    // Crop + slice once; the gate and the recognizer read the same lines.
+    const regionLines: ImageData[][] = bboxes.map((bbox) => {
+      const rawCrop = cropBubbleFromImage(bitmap, bbox, sourceLang, engineId);
+      const normalizedCrop = normalizePolarity(rawCrop);
+      const boostedCrop = boostContrast(normalizedCrop);
+      const bubbleH = bbox.y2 - bbox.y1;
+      const bubbleW = bbox.x2 - bbox.x1;
+      const isSingleLine = Math.min(bubbleH, bubbleW) < 24;
+      return isSingleLine
+        ? [padImageForOCR(boostedCrop, 4)]
+        : sliceImageDataIntoLines(boostedCrop).map((line) =>
+            padImageForOCR(line, 4),
+          );
+    });
 
-  // Crop + slice once; the gate and the recognizer read the same lines.
-  const regionLines: ImageData[][] = bboxes.map((bbox) => {
-    const rawCrop = cropBubbleFromImage(bitmap, bbox, sourceLang, engineId);
-    const normalizedCrop = normalizePolarity(rawCrop);
-    const boostedCrop = boostContrast(normalizedCrop);
-    const bubbleH = bbox.y2 - bbox.y1;
-    const bubbleW = bbox.x2 - bbox.x1;
-    const isSingleLine = Math.min(bubbleH, bubbleW) < 24;
-    return isSingleLine
-      ? [padImageForOCR(boostedCrop, 4)]
-      : sliceImageDataIntoLines(boostedCrop).map((line) =>
-          padImageForOCR(line, 4),
-        );
-  });
-
-  // --- script-ID pass ---
-  let gateLoaded = false;
-  if (mode !== "off") gateLoaded = await loadGate();
-  const verdicts: (RegionVerdict | null)[] = new Array(bboxes.length).fill(null);
-  if (mode !== "off" && gateLoaded) {
-    for (let i = 0; i < bboxes.length; i++) {
-      verdicts[i] = await judgeRegion(regionLines[i]);
-    }
-  }
-
-  let pageLabel: string | null = null;
-  let langGroup: string;
-  if (mode === "auto" && gateLoaded) {
-    pageLabel = majorityLabel(
-      verdicts.filter((v): v is RegionVerdict => v !== null),
-    );
-  }
-  const gateGroup = mode === "auto" && gateLoaded ? groupForLabel(pageLabel) : null;
-  if (gateGroup) {
-    langGroup = gateGroup;
-  } else {
-    const resolved = resolveLangGroup(sourceLang);
-    langGroup = resolved.group;
-    if (resolved.fellBack) {
-      console.warn(
-        `[ocr] "${sourceLang}" has no dedicated rec model — using languages/${langGroup}/rec.onnx`,
-      );
-    }
-  }
-
-  // Pre-filter: a CONFIDENT, TRUSTED wrong-script refusal never gets read
-  const filterEnabled = gateOptions?.enabled ?? true;
-  const gateSkip: (GateReason | null)[] = new Array(bboxes.length).fill(null);
-  if (filterEnabled && mode === "cjk" && gateLoaded) {
-    for (let i = 0; i < bboxes.length; i++) {
-      const v = verdicts[i];
-      if (v && v.decision === "wrong-script" && isTrustedLabel(v.script)) {
-        gateSkip[i] = "not-japanese";
+    // --- script-ID pass ---
+    let gateLoaded = false;
+    if (mode !== "off") gateLoaded = await loadGate();
+    const verdicts: (RegionVerdict | null)[] = new Array(bboxes.length).fill(null);
+    if (mode !== "off" && gateLoaded) {
+      for (let i = 0; i < bboxes.length; i++) {
+        verdicts[i] = await judgeRegion(regionLines[i]);
       }
     }
-  }
 
-  const engine = getOcrEngine(engineId);
-  const rawResults = await engine.recognize(
-    bitmap,
-    bboxes,
-    sourceLang,
-    regionLines,
-    gateSkip,
-    {
-      minConfidence,
-      batchSize,
-      recImgHeight,
-      langGroup,
-    },
-  );
+    let pageLabel: string | null = null;
+    let langGroup: string;
+    if (mode === "auto" && gateLoaded) {
+      pageLabel = majorityLabel(
+        verdicts.filter((v): v is RegionVerdict => v !== null),
+      );
+    }
+    const gateGroup = mode === "auto" && gateLoaded ? groupForLabel(pageLabel) : null;
+    if (gateGroup) {
+      langGroup = gateGroup;
+    } else {
+      const resolved = resolveLangGroup(sourceLang);
+      langGroup = resolved.group;
+      if (resolved.fellBack) {
+        console.warn(
+          `[ocr] "${sourceLang}" has no dedicated rec model — using languages/${langGroup}/rec.onnx`,
+        );
+      }
+    }
 
-  const result: OCRResult[] = rawResults.map((r, i) => ({
-    text: r.text,
-    confidence: r.confidence,
-    failed: r.failed,
-    gateSkip: gateSkip[i],
-  }));
+    // Pre-filter: a CONFIDENT, TRUSTED wrong-script refusal never gets read
+    const filterEnabled = gateOptions?.enabled ?? true;
+    const gateSkip: (GateReason | null)[] = new Array(bboxes.length).fill(null);
+    if (filterEnabled && mode === "cjk" && gateLoaded) {
+      for (let i = 0; i < bboxes.length; i++) {
+        const v = verdicts[i];
+        if (v && v.decision === "wrong-script" && isTrustedLabel(v.script)) {
+          gateSkip[i] = "not-japanese";
+        }
+      }
+    }
 
-  // Post-OCR verification & rescue
-  let skipped = gateSkip.filter((s) => s !== null).length;
-  for (let i = 0; i < bboxes.length; i++) {
-    if (gateSkip[i]) continue; // already skipped by pre-filter
-    const reason = filterEnabled
-      ? decideSkip(
-          mode,
-          verdicts[i],
-          result[i].text,
-          sourceLang,
-          pageLabel,
-        )
-      : null;
-    if (reason) {
-      result[i].gateSkip = reason;
-      skipped++;
+    const engine = getOcrEngine(engineId);
+    const rawResults = await engine.recognize(
+      bitmap,
+      bboxes,
+      sourceLang,
+      regionLines,
+      gateSkip,
+      {
+        minConfidence,
+        batchSize,
+        recImgHeight,
+        langGroup,
+      },
+    );
+
+    const result: OCRResult[] = rawResults.map((r, i) => ({
+      text: r.text,
+      confidence: r.confidence,
+      failed: r.failed,
+      gateSkip: gateSkip[i],
+    }));
+
+    // Post-OCR verification & rescue
+    let skipped = gateSkip.filter((s) => s !== null).length;
+    for (let i = 0; i < bboxes.length; i++) {
+      if (gateSkip[i]) continue; // already skipped by pre-filter
+      const reason = filterEnabled
+        ? decideSkip(
+            mode,
+            verdicts[i],
+            result[i].text,
+            sourceLang,
+            pageLabel,
+          )
+        : null;
+      if (reason) {
+        result[i].gateSkip = reason;
+        skipped++;
+      }
+    }
+
+    const gate: GateSummary = {
+      mode,
+      checked: verdicts.filter((v) => v !== null).length,
+      skipped,
+      group: langGroup,
+      unavailable: mode !== "off" && !gateLoaded,
+    };
+
+    return { results: result, gate };
+  } finally {
+    try {
+      bitmap.close();
+    } catch (err) {
+      console.warn("Failed to close OCR source bitmap:", err);
     }
   }
-
-  const gate: GateSummary = {
-    mode,
-    checked: verdicts.filter((v) => v !== null).length,
-    skipped,
-    group: langGroup,
-    unavailable: mode !== "off" && !gateLoaded,
-  };
-
-  return { results: result, gate };
 }

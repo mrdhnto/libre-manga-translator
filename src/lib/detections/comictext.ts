@@ -35,13 +35,13 @@ export async function runComicTextDetection(
   }
 
   await yieldToMain();
-  const inputTensor = new ort.Tensor("float32", imageBuffer, [1, 3, MODEL_SIZE, MODEL_SIZE]);
+  let inputTensor: ort.Tensor | null = new ort.Tensor("float32", imageBuffer, [1, 3, MODEL_SIZE, MODEL_SIZE]);
   const inputName = session.inputNames[0] ?? "image";
-  const results = await session.run({ [inputName]: inputTensor });
-  await yieldToMain();
-
   let headTensor: ort.Tensor | null = null;
   let segTensor: ort.Tensor | null = null;
+  try {
+    const results = await session.run({ [inputName]: inputTensor });
+    await yieldToMain();
 
   for (const name of session.outputNames) {
     const tensor = results[name];
@@ -119,4 +119,9 @@ export async function runComicTextDetection(
 
   const nms = containmentNMS(formattedDetections, 0.35);
   return refineDetections(nms, origWidth, origHeight).boxes;
+  } finally {
+    inputTensor?.dispose?.();
+    headTensor?.dispose?.();
+    segTensor?.dispose?.();
+  }
 }

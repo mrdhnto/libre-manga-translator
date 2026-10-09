@@ -66,6 +66,15 @@ export async function drawNumberedBboxes(
 
     img.onerror = () =>
       reject(new Error("Failed to load image for canvas drawing"));
-    fetchAsBase64(imageSrc).then((base64) => (img.src = base64));
+    // Data URLs need no fetch round-trip; a failed fetch must reject
+    // instead of leaving the promise hanging until the page timeout.
+    if (imageSrc.startsWith("data:")) {
+      img.src = imageSrc;
+      return;
+    }
+    fetchAsBase64(imageSrc).then(
+      (base64) => (img.src = base64),
+      (err) => reject(err instanceof Error ? err : new Error(String(err))),
+    );
   });
 }

@@ -80,16 +80,20 @@ export async function identifyLine(line: ImageData): Promise<LineScript | null> 
   const pre = osdPreprocess(line);
   if (!pre || pre.width < 3) return null;
 
-  return runLock.then(async () => {
+  // Serialize on the shared lock so concurrent lines never interleave
+  // session.run() on one session. Reset a rejected lock first.
+  const task = runLock.catch(() => {}).then(async () => {
+    let input: ort.Tensor | null = null;
+    let output: ort.Tensor | null = null;
     try {
-      const input = new ort.Tensor("float32", pre.data, [
+      input = new ort.Tensor("float32", pre.data, [
         1,
         1,
         48,
         pre.width,
       ]);
       const outputs = await s.run({ [s.inputNames[0]]: input });
-      const output = outputs[s.outputNames[0]];
+      output = outputs[s.outputNames[0]];
       const dims = output.dims as number[];
       const classes = dims[dims.length - 1];
       if (classes !== labels.length) {
@@ -106,8 +110,13 @@ export async function identifyLine(line: ImageData): Promise<LineScript | null> 
     } catch (err) {
       console.warn("LMT: script identification failed on a line:", err);
       return null;
+    } finally {
+      input?.dispose?.();
+      output?.dispose?.();
     }
   });
+  runLock = task.then(() => {});
+  return task;
 }
 
 /** Run the identifier over one region's lines and aggregate the votes. */

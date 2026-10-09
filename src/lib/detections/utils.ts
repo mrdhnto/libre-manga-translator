@@ -22,11 +22,15 @@ export async function scalingImage(imageSrc: string, modelSize: number = 1280) {
 
   // Draw the scaled image and extract the raw pixels
   ctx.drawImage(bitmap, offsetX, offsetY, newWidth, newHeight);
+  const imageData = ctx.getImageData(0, 0, modelSize, modelSize);
+  const origWidth = bitmap.width;
+  const origHeight = bitmap.height;
+  bitmap.close();
 
   return {
-    imageData: ctx.getImageData(0, 0, modelSize, modelSize),
-    origWidth: bitmap.width,
-    origHeight: bitmap.height,
+    imageData,
+    origWidth,
+    origHeight,
   };
 }
 

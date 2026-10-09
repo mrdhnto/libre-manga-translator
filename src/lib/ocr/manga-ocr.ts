@@ -75,7 +75,7 @@ export class MangaOcrEngine implements OcrEngine {
 
     const results: SingleOcrResult[] = new Array(bboxes.length);
 
-    this.runLock = this.runLock.then(async () => {
+    this.runLock = this.runLock.catch(() => {}).then(async () => {
       for (let i = 0; i < bboxes.length; i++) {
         if (gateSkip[i]) {
           results[i] = { text: "", confidence: 0, failed: false };
@@ -108,7 +108,7 @@ export class MangaOcrEngine implements OcrEngine {
         }
 
         try {
-          const encTensor = new ort.Tensor("float32", pixelValues, [
+          let encTensor: ort.Tensor | null = new ort.Tensor("float32", pixelValues, [
             1,
             3,
             INPUT_SIDE,
@@ -118,64 +118,76 @@ export class MangaOcrEngine implements OcrEngine {
           const encIn = this.encoderSession!.inputNames[0] ?? "pixel_values";
           encFeeds[encIn] = encTensor;
 
-          const encOut = await this.encoderSession!.run(encFeeds);
-          const hiddenState =
-            encOut["last_hidden_state"] ?? encOut[Object.keys(encOut)[0]];
+          let hiddenState: ort.Tensor | null = null;
+          try {
+            const encOut = await this.encoderSession!.run(encFeeds);
+            hiddenState =
+              encOut["last_hidden_state"] ?? encOut[Object.keys(encOut)[0]];
 
-          // Autoregressive greedy decoding
-          let tokens: bigint[] = [BigInt(CLS)];
-          let text = "";
-          let steps = 0;
+            // Autoregressive greedy decoding
+            let tokens: bigint[] = [BigInt(CLS)];
+            let text = "";
+            let steps = 0;
 
-          const decInNames = this.decoderSession!.inputNames;
-          const inputIdsName = decInNames.find((n) => n.includes("input_ids")) ?? "input_ids";
-          const hiddenName =
-            decInNames.find((n) => n.includes("encoder_hidden_states") || n.includes("hidden")) ??
-            "encoder_hidden_states";
+            const decInNames = this.decoderSession!.inputNames;
+            const inputIdsName = decInNames.find((n) => n.includes("input_ids")) ?? "input_ids";
+            const hiddenName =
+              decInNames.find((n) => n.includes("encoder_hidden_states") || n.includes("hidden")) ??
+              "encoder_hidden_states";
 
-          while (steps < MAX_TOKENS) {
-            const idsTensor = new ort.Tensor("int64", new BigInt64Array(tokens), [
-              1,
-              tokens.length,
-            ]);
-            const decFeeds: Record<string, ort.Tensor> = {
-              [inputIdsName]: idsTensor,
-              [hiddenName]: hiddenState,
-            };
+            while (steps < MAX_TOKENS) {
+              let idsTensor: ort.Tensor | null = new ort.Tensor("int64", new BigInt64Array(tokens), [
+                1,
+                tokens.length,
+              ]);
+              const decFeeds: Record<string, ort.Tensor> = {
+                [inputIdsName]: idsTensor,
+                [hiddenName]: hiddenState,
+              };
 
-            const decOut = await this.decoderSession!.run(decFeeds);
-            const logitsTensor = decOut["logits"] ?? decOut[Object.keys(decOut)[0]];
-            const logits = logitsTensor.data as Float32Array;
-            const numClasses = this.vocab!.length;
+              let logitsTensor: ort.Tensor | null = null;
+              try {
+                const decOut = await this.decoderSession!.run(decFeeds);
+                logitsTensor = decOut["logits"] ?? decOut[Object.keys(decOut)[0]];
+                const logits = logitsTensor.data as Float32Array;
+                const numClasses = this.vocab!.length;
 
-            const lastRowOffset = (tokens.length - 1) * numClasses;
-            let bestId = 0;
-            let maxLogit = -Infinity;
+                const lastRowOffset = (tokens.length - 1) * numClasses;
+                let bestId = 0;
+                let maxLogit = -Infinity;
 
-            for (let c = 0; c < numClasses; c++) {
-              const val = logits[lastRowOffset + c];
-              if (val > maxLogit) {
-                maxLogit = val;
-                bestId = c;
+                for (let c = 0; c < numClasses; c++) {
+                  const val = logits[lastRowOffset + c];
+                  if (val > maxLogit) {
+                    maxLogit = val;
+                    bestId = c;
+                  }
+                }
+
+                steps++;
+                if (bestId === SEP || bestId === PAD) break;
+
+                if (bestId >= FIRST_ORDINARY && bestId < this.vocab!.length) {
+                  const piece = this.vocab![bestId];
+                  text += piece.startsWith("##") ? piece.slice(2) : piece;
+                }
+
+                tokens.push(BigInt(bestId));
+              } finally {
+                idsTensor?.dispose?.();
+                logitsTensor?.dispose?.();
               }
             }
 
-            steps++;
-            if (bestId === SEP || bestId === PAD) break;
-
-            if (bestId >= FIRST_ORDINARY && bestId < this.vocab!.length) {
-              const piece = this.vocab![bestId];
-              text += piece.startsWith("##") ? piece.slice(2) : piece;
-            }
-
-            tokens.push(BigInt(bestId));
+            results[i] = {
+              text: text.trim(),
+              confidence: text.length > 0 ? 0.9 : 0.0,
+              failed: text.length === 0,
+            };
+          } finally {
+            encTensor?.dispose?.();
+            hiddenState?.dispose?.();
           }
-
-          results[i] = {
-            text: text.trim(),
-            confidence: text.length > 0 ? 0.9 : 0.0,
-            failed: text.length === 0,
-          };
         } catch (err) {
           console.warn("Manga-OCR inference error on box", i, err);
           results[i] = { text: "", confidence: 0, failed: true };

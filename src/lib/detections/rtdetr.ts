@@ -37,21 +37,28 @@ export async function runRtDetrDetection(
   }
 
   await yieldToMain();
-  const imageTensor = new ort.Tensor("float32", buffer, [1, 3, INPUT_SIZE, INPUT_SIZE]);
+  let imageTensor: ort.Tensor | null = new ort.Tensor("float32", buffer, [1, 3, INPUT_SIZE, INPUT_SIZE]);
   // Model contract measured: width first [origWidth, origHeight]
   const sizeArray = new BigInt64Array([BigInt(origWidth), BigInt(origHeight)]);
-  const sizeTensor = new ort.Tensor("int64", sizeArray, [1, 2]);
+  let sizeTensor: ort.Tensor | null = new ort.Tensor("int64", sizeArray, [1, 2]);
 
   const inNames = session.inputNames;
   const feeds: Record<string, ort.Tensor> = {};
   feeds[inNames[0] ?? "images"] = imageTensor;
   feeds[inNames[1] ?? "orig_target_sizes"] = sizeTensor;
 
-  const results = await session.run(feeds);
-  await yieldToMain();
-  const labelsData = (await results["labels"].getData()) as BigInt64Array | Int32Array;
-  const boxesData = (await results["boxes"].getData()) as Float32Array;
-  const scoresData = (await results["scores"].getData()) as Float32Array;
+  let labelsTensor: ort.Tensor | null = null;
+  let boxesTensor: ort.Tensor | null = null;
+  let scoresTensor: ort.Tensor | null = null;
+  try {
+    const results = await session.run(feeds);
+    await yieldToMain();
+    labelsTensor = results["labels"];
+    boxesTensor = results["boxes"];
+    scoresTensor = results["scores"];
+    const labelsData = (await labelsTensor.getData()) as BigInt64Array | Int32Array;
+    const boxesData = (await boxesTensor.getData()) as Float32Array;
+    const scoresData = (await scoresTensor.getData()) as Float32Array;
 
   const textBoxes: Bbox[] = [];
   const bubbleBoxes: Bbox[] = [];
@@ -80,4 +87,11 @@ export async function runRtDetrDetection(
   const targetBoxes = textBoxes.length > 0 ? textBoxes : bubbleBoxes;
   const nms = containmentNMS(targetBoxes);
   return refineDetections(nms, origWidth, origHeight).boxes;
+  } finally {
+    imageTensor?.dispose?.();
+    sizeTensor?.dispose?.();
+    labelsTensor?.dispose?.();
+    boxesTensor?.dispose?.();
+    scoresTensor?.dispose?.();
+  }
 }

@@ -140,7 +140,7 @@ export default defineContentScript({
           return;
         }
       } catch {
-        // ignore resolve failure — fall through to normal pipeline
+        console.warn("LMT: cache-key resolve failed; continuing without dedupe guard");
       }
 
       // Attach the cacheKey to the pending claim (idempotent re-mark).
@@ -433,7 +433,7 @@ export default defineContentScript({
                       error: resp.error,
                     })
                       .then((entryId) => debugEntryIdBySrc.set(src, entryId))
-                      .catch(() => {});
+                      .catch((err) => console.warn("LMT: debug-log write failed:", err));
                     return resp;
                   }
 
@@ -489,7 +489,7 @@ export default defineContentScript({
                     .then((entryId) => {
                       debugEntryIdBySrc.set(src, entryId);
                     })
-                    .catch(() => {});
+                    .catch((err) => console.warn("LMT: debug-log write failed:", err));
 
                   const cacheKey = await translationKey();
                   storage
@@ -498,7 +498,7 @@ export default defineContentScript({
                       translations,
                       sourceTexts,
                     })
-                    .catch(() => {});
+                    .catch((err) => console.warn("LMT: page-cache persist failed:", err));
 
                   updateSeriesContext(
                     seriesContext ?? null,
@@ -507,7 +507,7 @@ export default defineContentScript({
                     resolvedPage,
                     translations,
                     context,
-                  ).catch(() => {});
+                  ).catch((err) => console.warn("LMT: series-context update failed:", err));
 
                   // Detach the success-log promise - return immediately.
                   void successEntryPromise;
