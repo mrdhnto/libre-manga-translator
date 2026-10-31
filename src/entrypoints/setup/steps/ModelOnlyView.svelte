@@ -76,11 +76,12 @@
       llmDone = true;
       const items = await storage.getItems(["local:cached-llms"]);
       const cached = (items[0].value as string[]) || [];
-      if (!cached.includes(selectedLlmModel)) {
-        await storage.setItems([
-          { key: "local:cached-llms", value: [...cached, selectedLlmModel] },
-        ]);
-      }
+      await storage.setItems([
+        ...(!cached.includes(selectedLlmModel)
+          ? [{ key: "local:cached-llms" as const, value: [...cached, selectedLlmModel] }]
+          : []),
+        { key: "sync:llm-model" as const, value: selectedLlmModel },
+      ]);
     } catch (err: any) {
       // Stop (engine.unload aborts reload) is user intent — not a failure.
       if (isAbortError(err)) {

@@ -69,6 +69,7 @@
       { key: "sync:current-mode", value: selectedMode },
       { key: "sync:ocr-engine", value: selectedOcrEngine },
       { key: "sync:inpaint-method", value: selectedInpaintMethod },
+      { key: "sync:llm-model", value: selectedLlmModel },
       ...(selectedMode === "gemini" && geminiKey.trim()
         ? ([{ key: "local:gemini-key", value: geminiKey.trim() }] as any)
         : []),
