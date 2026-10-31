@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { GripVertical, Copy, Check } from "lucide-svelte";
+  import { GripVertical, Copy, Check, Sparkles, LoaderCircle } from "lucide-svelte";
 
   interface Props {
     boxIndex: number;
@@ -7,6 +7,8 @@
     gateSkip?: GateReason;
     anchorX: number;
     anchorY: number;
+    isRetranslating?: boolean;
+    onRetranslate?: (skipOcr: boolean) => void;
   }
 
   let {
@@ -15,6 +17,8 @@
     gateSkip,
     anchorX,
     anchorY,
+    isRetranslating = false,
+    onRetranslate,
   }: Props = $props();
 
   let offsetX = $state(0);
@@ -72,6 +76,14 @@
       console.warn("Failed to copy source text", err);
     }
   }
+
+  function handleRetranslate(e: MouseEvent) {
+    e.stopPropagation();
+    e.preventDefault();
+    if (isRetranslating) return;
+    const skipOcr = e.ctrlKey || e.metaKey;
+    onRetranslate?.(skipOcr);
+  }
 </script>
 
 <!-- Floating Draggable Raw Text Pill.
@@ -84,7 +96,7 @@
          bg-[var(--surface-panel)]/95 border border-[var(--border-line)] shadow-[0_4px_16px_rgba(0,0,0,0.7),0_0_8px_var(--accent-cyan-glow)]
          text-[var(--text-primary)] font-mono text-[11px] backdrop-blur-md transition-shadow
          hover:border-[var(--accent-cyan)]/80 {isDragging ? 'cursor-grabbing scale-102 ring-1 ring-[var(--accent-cyan)]' : ''}"
-  style="left: max(8px, min(calc(100% - 220px), {anchorX + offsetX}px)); top: max(6px, min(calc(100% - 36px), {anchorY + offsetY + 6}px));"
+  style="left: max(8px, min(calc(100% - 250px), {anchorX + offsetX}px)); top: max(6px, min(calc(100% - 36px), {anchorY + offsetY + 6}px));"
   onmousedown={(e) => e.stopPropagation()}
   onpointerdown={(e) => e.stopPropagation()}
   onclick={(e) => {
@@ -121,20 +133,57 @@
     {sourceText || "N/A"}
   </span>
 
-  <!-- Copy Button -->
-  {#if sourceText}
-    <button
-      type="button"
-      onclick={handleCopy}
-      class="pointer-events-auto p-1 rounded-[3px] text-[var(--text-dim)] hover:text-[var(--accent-cyan)] hover:bg-[var(--surface-panel-alt)] transition-colors cursor-pointer"
-      title={copied ? "Copied!" : "Copy raw text to clipboard"}
-      aria-label="Copy raw text"
-    >
-      {#if copied}
-        <Check size={12} class="text-[var(--accent-emerald)]" />
-      {:else}
-        <Copy size={12} />
-      {/if}
-    </button>
-  {/if}
+  <!-- Actions -->
+  <div class="flex items-center gap-0.5">
+    {#if sourceText}
+      <button
+        type="button"
+        onclick={handleCopy}
+
+
+
+        class="pointer-events-auto p-1 rounded-[3px] text-[var(--text-dim)] hover:text-[var(--accent-cyan)] hover:bg-[var(--surface-panel-alt)] transition-colors cursor-pointer"
+        title={copied ? "Copied!" : "Copy raw text to clipboard"}
+        aria-label="Copy raw text"
+      >
+        {#if copied}
+
+          <Check size={12} class="text-[var(--accent-emerald)]" />
+        {:else}
+          <Copy size={12} />
+        {/if}
+      </button>
+    {/if}
+
+    <!-- Retranslate with AI Button -->
+    <div class="relative inline-flex group/retrans">
+      <button
+        type="button"
+        onclick={handleRetranslate}
+        disabled={isRetranslating}
+        class="pointer-events-auto p-1 rounded-[3px] text-[var(--text-dim)] hover:text-[var(--accent-cyan)] hover:bg-[var(--surface-panel-alt)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none"
+        aria-label="Retranslate with AI"
+      >
+        {#if isRetranslating}
+          <LoaderCircle size={12} class="animate-spin text-[var(--accent-cyan)]" />
+        {:else}
+          <Sparkles size={12} />
+        {/if}
+      </button>
+
+      <!-- Tooltip on hover / keyboard focus -->
+      <div
+        role="tooltip"
+        class="absolute bottom-full right-0 mb-1.5 hidden group-hover/retrans:flex group-focus-within/retrans:flex flex-col gap-0.5 pointer-events-none z-70 px-2 py-1.5 rounded-[4px] bg-[var(--surface-panel)] border border-[var(--border-line)] shadow-[0_4px_16px_rgba(0,0,0,0.8),0_0_8px_var(--accent-cyan-glow)] text-[10px] font-sans text-[var(--text-primary)] whitespace-nowrap"
+      >
+        {#if isRetranslating}
+          <span class="font-semibold text-[var(--accent-cyan)]">Retranslating…</span>
+        {:else}
+          <span class="font-semibold text-[var(--accent-cyan)]">Retranslate with AI</span>
+          <span class="text-[var(--text-muted)]">Click: re-read bubble (OCR / vision)</span>
+          <span class="text-[var(--text-muted)]">Ctrl/⌘ + click: use captured text (skip OCR)</span>
+        {/if}
+      </div>
+    </div>
+  </div>
 </div>

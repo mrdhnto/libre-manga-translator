@@ -11,7 +11,9 @@
     EditorToolbar,
     InpaintCanvasEditor,
     BubbleEditor,
+    Toasts,
   } from "@/lib/components/overlay";
+  import type { OverlayToast, ToastKind } from "@/lib/components/overlay/toasts";
   import type { InpaintPatch } from "@/lib/components/overlay/InpaintCanvasEditor.svelte";
   import type { EditorLayer, InpaintTool } from "@/lib/components/overlay/EditorToolbar.svelte";
 
@@ -36,7 +38,11 @@
     requestTextTranslation: (
       bboxes: Bbox[],
       isManuallySorted: boolean,
-      opts?: { gateForce?: boolean },
+      opts?: {
+        gateForce?: boolean;
+        transient?: boolean;
+        rawText?: string;
+      },
     ) => Promise<
       | {
           translations: Translations;
@@ -136,6 +142,158 @@
   let loadingMsg = $state("Detecting text…");
   let errorMsg = $state("");
   let errorTimer: ReturnType<typeof setTimeout>;
+
+  function generateBoxId(): string {
+    return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  }
+
+  const MAX_RETRANSLATE_QUEUE = 5;
+  let retranslatingBoxIds = $state<
+    Record<string, { label: string; draftAtRequest: string; mode: "ocr" | "raw" }>
+  >({});
+  let toasts = $state<OverlayToast[]>([]);
+  const toastTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  function dismissToast(id: string) {
+    const timer = toastTimers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      toastTimers.delete(id);
+    }
+    toasts = toasts.filter((t) => t.id !== id);
+  }
+
+  function addToast(message: string, kind: ToastKind = "info") {
+    const existing = toasts.find((t) => t.message === message);
+    const id = existing ? existing.id : generateBoxId();
+
+    const duration =
+      kind === "error"
+        ? 6000
+        : kind === "warn"
+          ? 4500
+          : 3500;
+
+    const oldTimer = toastTimers.get(id);
+    if (oldTimer) clearTimeout(oldTimer);
+
+    const newTimer = setTimeout(() => dismissToast(id), duration);
+    toastTimers.set(id, newTimer);
+
+    if (existing) {
+      toasts = toasts.map((t) => (t.id === id ? { ...t, kind } : t));
+    } else {
+      const updated = [...toasts, { id, kind, message }];
+      if (updated.length > 4) {
+        const dropped = updated.shift()!;
+        const dt = toastTimers.get(dropped.id);
+        if (dt) {
+          clearTimeout(dt);
+          toastTimers.delete(dropped.id);
+        }
+      }
+      toasts = updated;
+    }
+  }
+
+  function isRetranslatingBox(index: number): boolean {
+    const id = bboxes[index]?.id;
+    return !!(id && retranslatingBoxIds[id]);
+  }
+
+  async function handleRetranslateBox(index: number, skipOcr: boolean) {
+    const box = bboxes[index];
+    if (!box || !box.id) return;
+    const boxId = box.id;
+
+    if (retranslatingBoxIds[boxId]) {
+      addToast(`Box #${index + 1} is already being retranslated.`, "warn");
+      return;
+    }
+
+    if (Object.keys(retranslatingBoxIds).length >= MAX_RETRANSLATE_QUEUE) {
+      addToast("Retranslation queue is full (5/5). Please wait for a free slot.", "warn");
+      return;
+    }
+
+    const sourceText = sourceTexts[index] ?? "";
+    if (skipOcr && !sourceText.trim()) {
+      addToast(`Box #${index + 1} has no captured text to translate.`, "warn");
+      return;
+    }
+
+    const draftAtRequest = editDrafts[index] ?? "";
+    const label = `Box #${index + 1}`;
+    const retransMode = skipOcr ? "raw" : "ocr";
+
+    retranslatingBoxIds = {
+      ...retranslatingBoxIds,
+      [boxId]: { label, draftAtRequest, mode: retransMode },
+    };
+
+    try {
+      const boxSnapshot = $state.snapshot(box);
+      const result = await requestTextTranslation(
+        [boxSnapshot],
+        isManuallySorted,
+        {
+          gateForce: true,
+          transient: true,
+          rawText: skipOcr ? sourceText : undefined,
+        },
+      );
+
+      if (mode !== "editing") {
+        addToast(`${label} retranslated, but editor was closed.`, "info");
+        return;
+      }
+
+      const targetIndex = bboxes.findIndex((b) => b.id === boxId);
+      if (targetIndex === -1) {
+        addToast(`${label} was deleted — retranslation discarded.`, "warn");
+        return;
+      }
+
+      if (typeof result === "object" && "error" in result) {
+        addToast(`Retranslation failed: ${result.error}`, "error");
+        return;
+      }
+
+      const newText = result.translations?.[0];
+      if (newText === undefined || newText === null) {
+        addToast(`Nothing readable in ${label}.`, "warn");
+        return;
+      }
+
+      if (editDrafts[targetIndex] !== draftAtRequest) {
+        addToast(
+          `${label} draft was modified — retranslation discarded to protect edits.`,
+          "info",
+        );
+        return;
+      }
+
+      editDrafts = editDrafts.map((d, k) => (k === targetIndex ? newText : d));
+
+      if (!skipOcr && result.sourceTexts?.[0]) {
+        sourceTexts = sourceTexts.map((s, k) =>
+          k === targetIndex ? result.sourceTexts![0] : s,
+        );
+      }
+
+      const successMsg = skipOcr
+        ? `Box #${targetIndex + 1} retranslated from captured text. Press Apply to save.`
+        : `Box #${targetIndex + 1} retranslated (OCR re-read). Press Apply to save.`;
+      addToast(successMsg, "success");
+    } catch (err) {
+      addToast(`Retranslation error: ${(err as Error).message}`, "error");
+    } finally {
+      const next = { ...retranslatingBoxIds };
+      delete next[boxId];
+      retranslatingBoxIds = next;
+    }
+  }
+
 
   // Live geometry: mount props go stale when readers re-layout on page
   // change (the translated copy then renders smaller/offset). The content
@@ -461,6 +619,7 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
     const box = $state.snapshot(bboxes[i]);
     const result = await requestTextTranslation([box], true, {
       gateForce: true,
+      transient: true,
     });
     forcingIndex = null;
     if (typeof result === "object" && "error" in result) {
@@ -576,6 +735,7 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
     bboxes = [
       ...bboxes,
       {
+        id: generateBoxId(),
         x1: startX,
         y1: startY,
         x2: startX + boxW,
@@ -686,7 +846,8 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
           Number.isFinite(b.y2) &&
           b.x2 > b.x1 &&
           b.y2 > b.y1,
-      );
+      )
+      .map((b) => ({ ...b, id: b.id ?? generateBoxId() }));
 
     applyBboxesSort();
     if (initialCache) {
@@ -1116,7 +1277,7 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
     />
     {#if !showOriginal}
       {#each bboxes as box, i}
-        {#if box.gateSkip}
+        {#if box.gateSkip && !translations[i]}
           <div
             class="absolute border-2 border-dashed border-amber-500/90 rounded-sm pointer-events-none z-30"
             style:left="{box.x1 * liveScaleX}px"
@@ -1143,7 +1304,7 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
             </button>
           </div>
         {/if}
-        {#if box.inpaintDeclined && !box.gateSkip}
+        {#if box.inpaintDeclined && (!box.gateSkip || translations[i])}
           <div
             class="absolute border-2 border-dotted border-rose-500/80 rounded-sm pointer-events-none z-30"
             style:left="{box.x1 * liveScaleX}px"
@@ -1222,6 +1383,8 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
         onUpdateStyle={(i, style) => {
           bboxes[i] = { ...bboxes[i], style };
         }}
+        {isRetranslatingBox}
+        onRetranslateBox={handleRetranslateBox}
       />
     {/if}
 
@@ -1245,6 +1408,8 @@ function applyBboxesSort(direction: "rtl" | "ltr" = "rtl") {
     />
   {/if}
 
+  <Toasts {toasts} onDismiss={dismissToast} />
+  
   {#if errorMsg}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->

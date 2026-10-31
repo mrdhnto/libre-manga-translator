@@ -17,6 +17,8 @@
     onDragStart: (index: number, handle: string) => (e: MouseEvent) => void;
     onUpdateTranslation?: (index: number, text: string) => void;
     onUpdateStyle?: (index: number, style: TextStyle) => void;
+    isRetranslatingBox?: (index: number) => boolean;
+    onRetranslateBox?: (index: number, skipOcr: boolean) => void;
   }
 
   let {
@@ -33,6 +35,8 @@
     onDragStart,
     onUpdateTranslation,
     onUpdateStyle,
+    isRetranslatingBox,
+    onRetranslateBox,
   }: Props = $props();
 
   function stopHostKeydown(e: KeyboardEvent) {
@@ -87,7 +91,7 @@
     class="lmt-box absolute p-0 m-0 transition-colors select-none group
            {isActive
              ? `border-2 border-[var(--accent-cyan)] z-50 shadow-[0_0_14px_var(--accent-cyan-glow)] ${mode === 'editing' ? 'bg-transparent' : 'bg-black/10'}`
-             : box.gateSkip
+             : box.gateSkip && !textValue
                ? `border-2 border-dashed border-[var(--accent-amber)]/90 z-40 ${mode === 'editing' ? 'bg-transparent' : 'bg-amber-950/10'}`
                : `border-2 border-[var(--accent-cyan)]/50 hover:border-[var(--accent-cyan)] z-40 ${mode === 'editing' ? 'bg-transparent' : 'bg-cyan-950/5'}`}"
     style:left="{box.x1 * scaleX}px"
@@ -112,14 +116,14 @@
       e.stopPropagation();
       e.preventDefault();
     }}
-    title={box.gateSkip
+    title={box.gateSkip && !textValue
       ? `${box.gateSkip === "not-japanese" ? "Language gate: not Japanese" : "Language gate: low confidence"}`
       : `Box #${i + 1}`}
   >
     <!-- Reading Order Badge -->
     <div
       class="absolute -top-5 -left-0.5 font-mono font-bold text-[10px] px-1.5 py-0.5 rounded-[2px] border pointer-events-none text-center
-             {box.gateSkip
+             {box.gateSkip && !textValue
                ? 'bg-[var(--accent-amber-soft)] border-[var(--accent-amber)]/60 text-[var(--accent-amber)]'
                : isActive
                  ? 'bg-[#121a26] border-[var(--accent-cyan)] text-[var(--accent-cyan)] shadow-[0_0_8px_var(--accent-cyan-glow)]'
@@ -247,9 +251,11 @@
   <FloatingRawTextPill
     boxIndex={activeIndex}
     sourceText={sourceTexts[activeIndex] ?? ""}
-    gateSkip={activeBox.gateSkip}
+    gateSkip={!translations[activeIndex] ? activeBox.gateSkip : undefined}
     anchorX={boxLeft}
     anchorY={boxBottom}
+    isRetranslating={isRetranslatingBox?.(activeIndex) ?? false}
+    onRetranslate={(skipOcr) => onRetranslateBox?.(activeIndex, skipOcr)}
   />
 {/if}
 

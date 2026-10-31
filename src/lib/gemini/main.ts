@@ -1,6 +1,7 @@
 import { MAKE_SITE_RULE_PROMPT } from "../adapters";
 import { DefaultConfig } from "../configs";
 import { drawNumberedBboxes } from "./utils";
+import { buildTranslationPrompts } from "../prompts";
 import { validateTranslationResult } from "../server/validator";
 
 export async function translateWithGemini(
@@ -66,6 +67,33 @@ ${
   );
 
   return validateTranslationResult(raw, bboxes.length);
+}
+
+export async function translateTextWithGemini(
+  text: string,
+  apiKey: string,
+  targetLang: string,
+  sourceLang: string,
+  seriesContext?: SeriesContext,
+  model = DefaultConfig.geminiModels[0].id,
+  temperature = DefaultConfig.llmTemperature,
+): Promise<TranslateResult> {
+  const { systemPrompt, userPrompt } = buildTranslationPrompts(
+    [text],
+    targetLang,
+    sourceLang,
+    seriesContext,
+  );
+
+  const raw = await sendRequestToGemini(
+    systemPrompt,
+    userPrompt,
+    apiKey,
+    model,
+    temperature,
+  );
+
+  return validateTranslationResult(raw, 1);
 }
 
 export async function makeSiteRuleWithGemini(

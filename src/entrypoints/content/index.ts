@@ -371,7 +371,11 @@ export default defineContentScript({
                 requestTextTranslation: async (
                   bboxes: Bbox[],
                   isManuallySorted: boolean,
-                  opts?: { gateForce?: boolean },
+                  opts?: {
+                    gateForce?: boolean;
+                    transient?: boolean;
+                    rawText?: string;
+                  },
                 ) => {
                   const t0 = performance.now();
                   const { seriesName, chapterId, pageIndex } =
@@ -475,6 +479,7 @@ export default defineContentScript({
                       src: src,
                       bboxes,
                       seriesContext,
+                      rawText: opts?.rawText,
                     },
                     config: {
                       currentMode: curMode,
@@ -503,36 +508,44 @@ export default defineContentScript({
                   const duration = performance.now() - t0;
 
                   if (resp?.error) {
-                    // Fire-and-forget debug log so a slow storage write never
-                    // blocks the next pipeline stage or the popup from opening.
-                    logDebugEntry({
-                      id: crypto.randomUUID(),
-                      timestamp: Date.now(),
-                      success: false,
-                      mode: curMode,
-                      version: debugCtx.version,
-                      device: debugCtx.device,
-                      sourceLang: srcLang,
-                      targetLang: tgtLang,
-                      langGroup: debugCtx.langGroup,
-                      bboxCount: bboxes.length,
-                      timing: { total: duration },
-                      ocrMinConfidence: debugCtx.ocrMinConfidence,
-                      detectionMinConfidence: debugCtx.detectionMinConfidence,
-                      temperature: debugCtx.temperature,
-                      serverSchema: debugCtx.serverSchema,
-                      geminiModel:
-                        curMode === "gemini" ? debugCtx.geminiModel : undefined,
-                      models: {
-                        detection: debugCtx.detectionModel,
-                        ocr: debugCtx.ocrModel,
-                        llm: curMode === "webgpu" ? debugCtx.llmModel : undefined,
-                        server: curMode === "api" ? debugCtx.serverModel : undefined,
-                      },
-                      error: resp.error,
-                    })
-                      .then((entryId) => debugEntryIdBySrc.set(src, entryId))
-                      .catch((err) => console.warn("LMT: debug-log write failed:", err));
+                    if (!opts?.transient) {
+
+                      // Fire-and-forget debug log so a slow storage write never
+                      // blocks the next pipeline stage or the popup from opening.
+                      logDebugEntry({
+                        id: crypto.randomUUID(),
+                        timestamp: Date.now(),
+                        success: false,
+                        mode: curMode,
+                        version: debugCtx.version,
+                        device: debugCtx.device,
+                        sourceLang: srcLang,
+                        targetLang: tgtLang,
+                        langGroup: debugCtx.langGroup,
+                        bboxCount: bboxes.length,
+                        timing: { total: duration },
+
+                        ocrMinConfidence: debugCtx.ocrMinConfidence,
+                        detectionMinConfidence: debugCtx.detectionMinConfidence,
+                        temperature: debugCtx.temperature,
+                        serverSchema: debugCtx.serverSchema,
+                        geminiModel:
+
+                          curMode === "gemini" ? debugCtx.geminiModel : undefined,
+                        models: {
+
+                          detection: debugCtx.detectionModel,
+                          ocr: debugCtx.ocrModel,
+
+                          llm: curMode === "webgpu" ? debugCtx.llmModel : undefined,
+                          server: curMode === "api" ? debugCtx.serverModel : undefined,
+                        },
+                        error: resp.error,
+                      })
+
+                        .then((entryId) => debugEntryIdBySrc.set(src, entryId))
+                        .catch((err) => console.warn("LMT: debug-log write failed:", err));
+                    }
                     return resp;
                   }
 
@@ -546,9 +559,11 @@ export default defineContentScript({
                   };
                   const backend = resp?.backend;
 
-                  // Fire-and-forget: success debug log, page cache, and series
-                  // context updates. None of these need to block the popup.
-                  const successEntryPromise = logDebugEntry({
+                  if (!opts?.transient) {
+
+                    // Fire-and-forget: success debug log, page cache, and series
+                    // context updates. None of these need to block the popup.
+                    const successEntryPromise = logDebugEntry({
                     id: crypto.randomUUID(),
                     timestamp: Date.now(),
                     success: true,
@@ -607,9 +622,7 @@ export default defineContentScript({
                     translations,
                     context,
                   ).catch((err) => console.warn("LMT: series-context update failed:", err));
-
-                  // Detach the success-log promise - return immediately.
-                  void successEntryPromise;
+                }
 
                   return { translations, sourceTexts, context, gateSkip, gate };
                 },

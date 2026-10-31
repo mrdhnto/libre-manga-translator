@@ -1,5 +1,5 @@
 import { UNKNOWN_DETECTION_MODEL_MESSAGE, detectTextBubble, releaseDetection } from "@/lib/detections/main";
-import { makeSiteRuleWithGemini, translateWithGemini } from "@/lib/gemini/main";
+import { makeSiteRuleWithGemini, translateWithGemini, translateTextWithGemini } from "@/lib/gemini/main";
 import "@/assets/app.css";
 import { releaseOcrEngines, textRecognise } from "@/lib/ocr/main";
 import {
@@ -73,11 +73,87 @@ browser.runtime.onMessage.addListener((msg, _, sendResponse) => {
       scriptGate,
       gateForce,
     } = msg.config;
-    const { src, bboxes, seriesContext } = msg.data;
+    const { src, bboxes, seriesContext, rawText } = msg.data;
     const gateOptions = {
       enabled: scriptGate ?? true,
       force: gateForce ?? false,
     };
+
+    if (typeof rawText === "string") {
+      if (currentMode === "webgpu") {
+        (async () => {
+          await yieldToMain();
+          const tTrans = performance.now();
+          const backend = await detectBackend();
+          if (backend === "wasm") {
+            sendResponse({
+              error:
+                "Local AI requires WebGPU — not available in this context. Check chrome://gpu or switch to Gemini / API mode.",
+            });
+            return;
+          }
+          try {
+            const res = await translateLocal(
+              [rawText],
+              targetLang,
+              sourceLang,
+              seriesContext,
+              llmModel,
+              llmTemperature,
+            );
+            sendResponse({
+              ...res,
+              sourceTexts: [rawText],
+              gateSkip: [null],
+              timing: { translate: performance.now() - tTrans },
+              backend,
+            });
+          } catch (err) {
+            sendResponse({ error: (err as Error).message });
+          }
+        })().catch((err) => sendResponse({ error: err.message }));
+      } else if (currentMode === "api") {
+        (async () => {
+          await yieldToMain();
+          const tTrans = performance.now();
+          const res = await translateWithServer(
+            [rawText],
+            targetLang,
+            sourceLang,
+            seriesContext,
+            serverConfig(msg.config),
+          );
+          sendResponse({
+            ...res,
+            sourceTexts: [rawText],
+            gateSkip: [null],
+            timing: { translate: performance.now() - tTrans },
+          });
+        })().catch((err) => sendResponse({ error: err.message }));
+      } else {
+        (async () => {
+          await yieldToMain();
+          const tTrans = performance.now();
+          const res = await translateTextWithGemini(
+            rawText,
+            geminiKey,
+            targetLang,
+            sourceLang,
+            seriesContext,
+            geminiModel,
+            llmTemperature,
+          );
+          sendResponse({
+            ...res,
+            sourceTexts: [rawText],
+            gateSkip: [null],
+            gate: { mode: "off", checked: 0, skipped: 0, unavailable: false },
+            timing: { translate: performance.now() - tTrans },
+          });
+        })().catch((err) => sendResponse({ error: err.message }));
+      }
+      return true;
+    }
 
     if (currentMode === "webgpu") {
       (async () => {

@@ -6,3 +6,5 @@ export { default as InpaintCanvasEditor } from "./InpaintCanvasEditor.svelte";
 export { default as BubbleEditor } from "./BubbleEditor.svelte";
 export { default as BubbleRenderer } from "./BubbleRenderer.svelte";
 export { default as TextEditModal } from "./TextEditModal.svelte";
+export { default as Toasts } from "./Toasts.svelte";
+export * from "./toasts";
